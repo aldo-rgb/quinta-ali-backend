@@ -44,6 +44,17 @@ app.get('/', (req, res) => {
   res.send('¡API de La Quinta de Alí funcionando al 100%!');
 });
 
+// Test de conexión a BD
+app.get('/api/health', async (req, res) => {
+  try {
+    const pool = require('./db/connection');
+    const result = await pool.query('SELECT NOW()');
+    res.json({ status: 'ok', time: result.rows[0].now, node_env: process.env.NODE_ENV });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message, code: err.code });
+  }
+});
+
 // Levantar el servidor
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
