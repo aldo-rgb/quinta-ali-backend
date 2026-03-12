@@ -1,0 +1,412 @@
+const { Router } = require('express');
+const pool = require('../db/connection');
+const adminAuth = require('../middleware/adminAuth');
+const preciosRouter = require('./precios');
+const cloudinary = require('cloudinary').v2;
+const multer = require('multer');
+
+const router = Router();
+
+// Configurar Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Multer para subir INE (imágenes y PDF, max 10MB)
+const uploadINE = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Solo se permiten imágenes o PDF'));
+    }
+  },
+});
+
+// GET /api/reservaciones — Listar reservaciones (admin)
+router.get('/', adminAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT r.*, 
+             c.nombre AS cliente_nombre, c.apellido AS cliente_apellido, c.telefono AS cliente_telefono, c.email AS cliente_email,
+             p.nombre AS paquete_nombre, p.tipo_duracion, p.duracion_horas
+      FROM reservaciones r
+      JOIN clientes c ON r.cliente_id = c.id
+      JOIN paquetes p ON r.paquete_id = p.id
+      ORDER BY r.fecha_evento ASC, r.hora_inicio ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error obteniendo reservaciones:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
+// GET /api/reservaciones/stats — Estadísticas para el admin dashboard
+router.get('/stats', adminAuth, async (req, res) => {
+  try {
+    const hoy = new Date().toISOString().split('T')[0];
+    const inicioMes = hoy.substring(0, 7) + '-01';
+
+    const [totalRes, resHoy, pendientes, ingresosMes, extrasMes, topExtras] = await Promise.all([
+      pool.query("SELECT COUNT(*) FROM reservaciones WHERE estado = 'confirmada'"),
+      pool.query("SELECT COUNT(*) FROM reservaciones WHERE fecha_evento::date = $1 AND estado NOT IN ('cancelada')", [hoy]),
+      pool.query("SELECT COUNT(*) FROM reservaciones WHERE estado = 'cancelada'"),
+      pool.query(
+        `SELECT COALESCE(SUM(monto_total), 0) as total
+         FROM reservaciones
+         WHERE fecha_evento >= $1 AND estado NOT IN ('cancelada')`, [inicioMes]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(re.subtotal), 0) as total
+         FROM reservacion_extras re
+         JOIN reservaciones r ON re.reservacion_id = r.id
+         WHERE r.fecha_evento >= $1 AND r.estado NOT IN ('cancelada')`, [inicioMes]
+      ),
+      pool.query(
+        `SELECT e.nombre, e.emoji, COUNT(*) as veces, SUM(re.subtotal) as ingreso
+         FROM reservacion_extras re
+         JOIN extras e ON re.extra_id = e.id
+         GROUP BY e.id, e.nombre, e.emoji
+         ORDER BY veces DESC LIMIT 5`
+      ),
+    ]);
+
+    res.json({
+      total_reservaciones: Number(totalRes.rows[0].count),
+      reservaciones_hoy: Number(resHoy.rows[0].count),
+      pendientes: Number(pendientes.rows[0].count),
+      ingresos_mes: Number(ingresosMes.rows[0].total),
+      ingresos_extras_mes: Number(extrasMes.rows[0].total),
+      top_extras: topExtras.rows,
+    });
+  } catch (err) {
+    console.error('Error obteniendo stats:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
+// GET /api/reservaciones/disponibilidad?fecha=2026-03-14
+// Retorna los horarios ocupados para una fecha dada
+router.get('/disponibilidad', async (req, res) => {
+  try {
+    const { fecha } = req.query;
+    if (!fecha) return res.status(400).json({ message: 'Se requiere parámetro fecha' });
+
+    const { rows } = await pool.query(
+      `SELECT hora_inicio, hora_fin, paquete_id
+       FROM reservaciones
+       WHERE fecha_evento = $1 AND estado NOT IN ('cancelada')
+       ORDER BY hora_inicio`,
+      [fecha]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Error verificando disponibilidad:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
+// GET /api/reservaciones/calendario?mes=2026-03
+// Retorna resumen de ocupación por día para un mes completo
+router.get('/calendario', async (req, res) => {
+  try {
+    const { mes } = req.query;
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ message: 'Se requiere parámetro mes en formato YYYY-MM' });
+    }
+
+    const inicioMes = `${mes}-01`;
+    const [year, month] = mes.split('-').map(Number);
+    const ultimoDia = new Date(year, month, 0).getDate();
+    const finMes = `${mes}-${String(ultimoDia).padStart(2, '0')}`;
+
+    // Obtener todas las reservaciones del mes (no canceladas)
+    const { rows } = await pool.query(
+      `SELECT fecha_evento, hora_inicio, hora_fin, paquete_id, p.tipo_duracion
+       FROM reservaciones r
+       JOIN paquetes p ON r.paquete_id = p.id
+       WHERE fecha_evento BETWEEN $1 AND $2 AND r.estado NOT IN ('cancelada')
+       ORDER BY fecha_evento, hora_inicio`,
+      [inicioMes, finMes]
+    );
+
+    // Agrupar por fecha: contar reservaciones y detectar si el día está lleno
+    // Un día está "lleno" si tiene un paquete de noche (Pijama Party) o 3+ reservaciones por día
+    const porDia = {};
+    for (const r of rows) {
+      const fecha = r.fecha_evento instanceof Date
+        ? r.fecha_evento.toISOString().split('T')[0]
+        : String(r.fecha_evento).split('T')[0];
+      if (!porDia[fecha]) porDia[fecha] = { reservaciones: 0, tiene_noche: false };
+      porDia[fecha].reservaciones++;
+      if (r.tipo_duracion === 'noche') porDia[fecha].tiene_noche = true;
+    }
+
+    // Construir respuesta: array de { fecha, reservaciones, disponible }
+    const calendario = {};
+    for (const [fecha, info] of Object.entries(porDia)) {
+      calendario[fecha] = {
+        reservaciones: info.reservaciones,
+        disponible: !info.tiene_noche && info.reservaciones < 3,
+      };
+    }
+
+    res.json(calendario);
+  } catch (err) {
+    console.error('Error obteniendo calendario:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
+// POST /api/reservaciones — Crear nueva reservación
+router.post('/', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { cliente_id, paquete_id, fecha_evento, hora_inicio, num_invitados, notas } = req.body;
+
+    if (!cliente_id || !paquete_id || !fecha_evento || !hora_inicio) {
+      return res.status(400).json({ message: 'Faltan campos obligatorios: cliente_id, paquete_id, fecha_evento, hora_inicio' });
+    }
+
+    await client.query('BEGIN');
+
+    // Obtener info del paquete para calcular hora_fin y monto
+    const paqueteRes = await client.query('SELECT * FROM paquetes WHERE id = $1', [paquete_id]);
+    if (paqueteRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Paquete no encontrado' });
+    }
+    const paquete = paqueteRes.rows[0];
+
+    // Calcular hora_fin basado en tipo de paquete
+    let hora_fin;
+    if (paquete.tipo_duracion === 'noche') {
+      hora_fin = '23:59';
+    } else {
+      // Sumar las horas de duración
+      const [h, m] = hora_inicio.split(':').map(Number);
+      const finH = h + (paquete.duracion_horas || 4);
+      hora_fin = `${String(Math.min(finH, 23)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    const monto_total = paquete.precio;
+
+    // Aplicar precio dinámico si hay reglas activas
+    const reglasRes = await client.query('SELECT * FROM reglas_precio_dinamico WHERE activo = TRUE');
+    let montoConDinamico;
+    if (reglasRes.rows.length > 0) {
+      const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglasRes.rows);
+      montoConDinamico = calc.precioFinal;
+    } else {
+      montoConDinamico = Number(paquete.precio);
+    }
+
+    // Insertar (el trigger verificará empalmes automáticamente)
+    const { rows } = await client.query(
+      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados || null, montoConDinamico, notas || null]
+    );
+
+    await client.query('COMMIT');
+
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+
+    // Si es error de empalme del trigger, retornar 409 Conflict
+    if (err.message && err.message.includes('CONFLICTO DE HORARIO')) {
+      return res.status(409).json({ message: err.message });
+    }
+
+    console.error('Error creando reservación:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/reservaciones/:id/estado — Actualizar estado (admin: confirmar, cancelar, etc.)
+router.patch('/:id/estado', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado } = req.body;
+
+    const estadosValidos = ['pendiente', 'confirmada', 'pagada', 'cancelada', 'completada'];
+    if (!estadosValidos.includes(estado)) {
+      return res.status(400).json({ message: `Estado inválido. Opciones: ${estadosValidos.join(', ')}` });
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE reservaciones SET estado = $1, actualizado_en = NOW() WHERE id = $2 RETURNING *`,
+      [estado, id]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ message: 'Reservación no encontrada' });
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error actualizando estado:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
+// POST /api/reservaciones/completa — Flujo completo: crear cliente + reservación en un solo request
+router.post('/completa', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { nombre, apellido, telefono, email, google_id, es_invitado, paquete_id, fecha_evento, hora_inicio, num_invitados, notas, extras, ine_url } = req.body;
+
+    if (!nombre || !email || !paquete_id || !fecha_evento || !hora_inicio) {
+      return res.status(400).json({ message: 'Faltan campos obligatorios' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Crear o encontrar cliente (buscar por google_id, luego email)
+    let clienteId;
+    let existente;
+
+    if (google_id) {
+      existente = await client.query('SELECT id FROM clientes WHERE google_id = $1', [google_id]);
+    }
+    if (!existente || existente.rows.length === 0) {
+      existente = await client.query('SELECT id FROM clientes WHERE email = $1', [email]);
+    }
+
+    if (existente.rows.length > 0) {
+      clienteId = existente.rows[0].id;
+      await client.query(
+        `UPDATE clientes SET nombre = $1, apellido = $2, telefono = $3, google_id = COALESCE($4, google_id), es_invitado = $5, actualizado_en = NOW() WHERE id = $6`,
+        [nombre, apellido || '', telefono || null, google_id || null, es_invitado || false, clienteId]
+      );
+    } else {
+      const nuevoCliente = await client.query(
+        `INSERT INTO clientes (nombre, apellido, telefono, email, google_id, es_invitado) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [nombre, apellido || '', telefono || null, email, google_id || null, es_invitado || false]
+      );
+      clienteId = nuevoCliente.rows[0].id;
+    }
+
+    // 2. Obtener paquete
+    const paqRes = await client.query('SELECT * FROM paquetes WHERE id = $1 AND activo = TRUE', [paquete_id]);
+    if (paqRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Paquete no encontrado' });
+    }
+    const paquete = paqRes.rows[0];
+
+    // 3. Calcular hora_fin
+    let hora_fin;
+    if (paquete.tipo_duracion === 'noche') {
+      hora_fin = '23:59';
+    } else {
+      const [h, m] = hora_inicio.split(':').map(Number);
+      const finH = h + (paquete.duracion_horas || 4);
+      hora_fin = `${String(Math.min(finH, 23)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    // 4. Calcular total con extras
+    let montoExtras = 0;
+    if (extras && extras.length > 0) {
+      for (const ex of extras) {
+        montoExtras += Number(ex.precio) * (ex.cantidad || 1);
+      }
+    }
+    const montoTotal = Number(paquete.precio) + montoExtras;
+
+    // Aplicar precio dinámico
+    const reglasRes = await client.query('SELECT * FROM reglas_precio_dinamico WHERE activo = TRUE');
+    let montoTotalDinamico;
+    if (reglasRes.rows.length > 0) {
+      const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglasRes.rows);
+      montoTotalDinamico = calc.precioFinal + montoExtras;
+    } else {
+      montoTotalDinamico = montoTotal;
+    }
+
+    // 5. Crear reservación (trigger verifica empalmes)
+    const { rows } = await client.query(
+      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [clienteId, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null]
+    );
+
+    const reservacionId = rows[0].id;
+
+    // 6. Guardar extras seleccionados
+    if (extras && extras.length > 0) {
+      for (const ex of extras) {
+        const cant = ex.cantidad || 1;
+        const subtotal = Number(ex.precio) * cant;
+        await client.query(
+          `INSERT INTO reservacion_extras (reservacion_id, extra_id, cantidad, precio_unitario, subtotal)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [reservacionId, ex.id, cant, ex.precio, subtotal]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      reservacion: rows[0],
+      cliente_id: clienteId,
+      paquete: paquete.nombre,
+      monto_total: montoTotal,
+      monto_extras: montoExtras,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+
+    if (err.message && err.message.includes('CONFLICTO DE HORARIO')) {
+      return res.status(409).json({ message: 'Ese horario ya está ocupado. Por favor elige otra fecha u hora.' });
+    }
+
+    console.error('Error en reservación completa:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/reservaciones/subir-ine — Subir foto de INE a Cloudinary
+router.post('/subir-ine', uploadINE.single('ine'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Se requiere un archivo de imagen o PDF' });
+    }
+
+    const resultado = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'quinta-ali/ine',
+          resource_type: 'auto',
+          transformation: [
+            { quality: 'auto', fetch_format: 'auto' },
+            { width: 1600, height: 1200, crop: 'limit' },
+          ],
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      stream.end(req.file.buffer);
+    });
+
+    res.json({ url: resultado.secure_url });
+  } catch (err) {
+    console.error('Error subiendo INE:', err.message);
+    res.status(500).json({ message: 'Error al subir el documento' });
+  }
+});
+
+module.exports = router;
