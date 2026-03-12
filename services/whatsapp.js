@@ -148,10 +148,69 @@ async function confirmarReservacionCliente(telefono, nombre, paquete, fecha, hor
   return enviarMensaje(telefono, texto);
 }
 
+/**
+ * Enviar "Pase de Abordar" digital al cliente tras pago completo.
+ * @param {object} datos - Toda la info de la reservación pagada
+ */
+async function enviarPaseAbordar(datos) {
+  const {
+    telefono,
+    nombre,
+    fechaEvento,
+    horaInicio,
+    horaFin,
+    capacidad,
+    codigoPin,
+    montoTotal,
+    paqueteNombre,
+    reservacionId,
+  } = datos;
+
+  const GOOGLE_MAPS_LINK = process.env.GOOGLE_MAPS_LINK || 'https://maps.app.goo.gl/quintadeali';
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+  // Formatear fecha legible (ej: "Sábado 14 de Marzo 2026")
+  const diasSemana = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const d = new Date(fechaEvento + 'T12:00:00');
+  const fechaFormateada = `${diasSemana[d.getDay()]} ${d.getDate()} de ${meses[d.getMonth()]} ${d.getFullYear()}`;
+
+  // Hora de salida formateada
+  const horaSalida = horaFin === '23:59' ? '11:00 AM (día siguiente)' : `${horaFin} hrs`;
+
+  // PIN formateado con espacios para legibilidad
+  const pinFormateado = codigoPin ? `[ ${codigoPin.split('').join(' ')} ]` : '[Pendiente]';
+
+  const montoFormateado = `$${Number(montoTotal).toLocaleString('es-MX')} MXN`;
+
+  const linkPase = `${FRONTEND_URL}/pago/exitoso?reservacion_id=${reservacionId}`;
+
+  const texto =
+    `¡Hola, ${nombre}! 🎉\n` +
+    `Tu evento en *La Quinta de Alí* está *100% confirmado y liquidado*. ¡Gracias por confiar en nosotros para tus momentos premium! 🌴\n\n` +
+    `Aquí tienes tu *Pase de Abordar* oficial. Guárdalo muy bien:\n\n` +
+    `🗓 *Fecha de tu evento:* ${fechaFormateada}\n` +
+    `🕒 *Horario:* Entrada ${horaInicio} hrs — Salida ${horaSalida}\n` +
+    `👥 *Capacidad:* Hasta ${capacidad} invitados\n` +
+    `📍 *Ubicación exacta (Google Maps):*\n${GOOGLE_MAPS_LINK}\n\n` +
+    `🔐 *TU ACCESO VIP:*\n` +
+    `Tu código de acceso personal es: *${pinFormateado}*\n` +
+    `_(Este PIN desbloqueará la entrada únicamente durante el horario de tu evento. Compártelo solo con tus invitados de confianza)._\n\n` +
+    `📄 *Recibo y Reglamento:*\n` +
+    `Tu pago por *${montoFormateado}* ha sido procesado con éxito. Puedes ver tu pase de abordar digital y los detalles de tu reservación en:\n` +
+    `${linkPase}\n\n` +
+    `💡 *¿Olvidaste algo?* Si necesitas agregar bolsas de hielo, carbón o leña para el asador, puedes hacerlo directo en este chat hasta 24 horas antes de tu evento.\n\n` +
+    `¡Nos vemos pronto para celebrar en grande! 🥂\n` +
+    `— El equipo de *La Quinta de Alí*`;
+
+  return enviarMensaje(telefono, texto);
+}
+
 module.exports = {
   enviarMensaje,
   enviarBotones,
   enviarLista,
   notificarNuevaReservacion,
   confirmarReservacionCliente,
+  enviarPaseAbordar,
 };

@@ -1,6 +1,8 @@
 const { Router } = require('express');
 const pool = require('../db/connection');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
+const whatsapp = require('../services/whatsapp');
 
 const router = Router();
 
@@ -43,6 +45,81 @@ function obtenerCargo(chargeId) {
       else resolve(charge);
     });
   });
+}
+
+/**
+ * Helper: Auto-generar PIN y enviar Pase de Abordar por WhatsApp
+ * Se ejecuta cuando una reservación queda liquidada (monto_pagado >= monto_total)
+ */
+async function enviarPaseDeAbordar(reservacionId) {
+  try {
+    // Obtener toda la info necesaria
+    const { rows } = await pool.query(`
+      SELECT r.id, r.fecha_evento, r.hora_inicio, r.hora_fin, r.monto_total, r.num_invitados,
+             c.nombre AS cliente_nombre, c.telefono, c.whatsapp,
+             p.nombre AS paquete_nombre, p.capacidad_max
+      FROM reservaciones r
+      JOIN clientes c ON r.cliente_id = c.id
+      JOIN paquetes p ON r.paquete_id = p.id
+      WHERE r.id = $1
+    `, [reservacionId]);
+
+    if (rows.length === 0) return;
+    const r = rows[0];
+
+    const telefono = r.whatsapp || r.telefono;
+    if (!telefono) return;
+
+    const telFormateado = telefono.startsWith('52') ? telefono : `52${telefono.replace(/\D/g, '')}`;
+
+    // Auto-generar PIN de acceso
+    const pin = String(crypto.randomInt(1000, 9999));
+    const fechaEvento = new Date(r.fecha_evento + 'T12:00:00');
+    const [hInicio] = r.hora_inicio.split(':').map(Number);
+    const [hFin] = r.hora_fin.split(':').map(Number);
+
+    const validoDesde = new Date(fechaEvento);
+    validoDesde.setHours(hInicio - 1, 0, 0, 0);
+
+    const validoHasta = new Date(fechaEvento);
+    if (hFin === 23 && r.hora_fin === '23:59') {
+      validoHasta.setDate(validoHasta.getDate() + 1);
+      validoHasta.setHours(11, 0, 0, 0);
+    } else {
+      validoHasta.setHours(hFin + 1, 0, 0, 0);
+    }
+
+    await pool.query(
+      `INSERT INTO codigos_acceso (reservacion_id, codigo_pin, valido_desde, valido_hasta, enviado)
+       VALUES ($1, $2, $3, $4, TRUE)
+       ON CONFLICT (reservacion_id) DO UPDATE SET
+         codigo_pin = EXCLUDED.codigo_pin,
+         valido_desde = EXCLUDED.valido_desde,
+         valido_hasta = EXCLUDED.valido_hasta,
+         activo = TRUE, enviado = TRUE,
+         creado_en = NOW()
+       RETURNING *`,
+      [reservacionId, pin, validoDesde.toISOString(), validoHasta.toISOString()]
+    );
+
+    // Enviar Pase de Abordar por WhatsApp
+    await whatsapp.enviarPaseAbordar({
+      telefono: telFormateado,
+      nombre: r.cliente_nombre,
+      fechaEvento: r.fecha_evento,
+      horaInicio: r.hora_inicio,
+      horaFin: r.hora_fin,
+      capacidad: r.capacidad_max || r.num_invitados || 30,
+      codigoPin: pin,
+      montoTotal: r.monto_total,
+      paqueteNombre: r.paquete_nombre,
+      reservacionId: r.id,
+    });
+
+  } catch (err) {
+    // No dejar que falle el webhook por un error de WhatsApp
+    console.error('Error enviando Pase de Abordar:', err.message);
+  }
 }
 
 // POST /api/pagos/generar-referencia — Generar referencia Paynet (pago en tienda)
@@ -360,11 +437,17 @@ router.post('/webhook', async (req, res) => {
           WHERE openpay_charge_id = $1
         `, [transaccion.id]);
 
-        await pool.query(`
+        const updRes = await pool.query(`
           UPDATE reservaciones SET monto_pagado = monto_pagado + $1,
             estado = CASE WHEN monto_pagado + $1 >= monto_total THEN 'pagada' ELSE 'confirmada' END
           WHERE id = $2 AND estado IN ('pendiente', 'confirmada')
+          RETURNING estado
         `, [pago.monto, pago.reservacion_id]);
+
+        // Si quedó liquidada, enviar Pase de Abordar
+        if (updRes.rows.length > 0 && updRes.rows[0].estado === 'pagada') {
+          enviarPaseDeAbordar(pago.reservacion_id);
+        }
       }
     } else if (tipo === 'charge.failed' || tipo === 'charge.cancelled') {
       await pool.query(`
@@ -410,12 +493,17 @@ router.get('/verificar/:chargeId', async (req, res) => {
             `UPDATE pagos SET estado = 'completado', actualizado_en = NOW() WHERE openpay_charge_id = $1`,
             [chargeId]
           );
-          await pool.query(
-            `UPDATE reservaciones SET monto_pagado = monto_pagado + $1, estado = CASE WHEN monto_pagado + $1 >= monto_total THEN 'pagada' ELSE 'confirmada' END WHERE id = $2 AND estado IN ('pendiente', 'confirmada')`,
+          const updRes = await pool.query(
+            `UPDATE reservaciones SET monto_pagado = monto_pagado + $1, estado = CASE WHEN monto_pagado + $1 >= monto_total THEN 'pagada' ELSE 'confirmada' END WHERE id = $2 AND estado IN ('pendiente', 'confirmada') RETURNING estado`,
             [rows[0].monto, rows[0].reservacion_id]
           );
           rows[0].estado = 'completado';
-          rows[0].reservacion_estado = 'confirmada';
+          rows[0].reservacion_estado = updRes.rows[0]?.estado || 'confirmada';
+
+          // Si quedó liquidada, enviar Pase de Abordar
+          if (updRes.rows.length > 0 && updRes.rows[0].estado === 'pagada') {
+            enviarPaseDeAbordar(rows[0].reservacion_id);
+          }
         }
       } catch {
         // Si falla la verificación, devolvemos lo que tenemos
@@ -504,12 +592,18 @@ router.post('/apple-pay', async (req, res) => {
     `, [reservacion.id, charge.id, orderId, montoPago, charge.status === 'completed' ? 'completado' : 'pendiente']);
 
     if (charge.status === 'completed') {
-      await pool.query(
+      const updRes = await pool.query(
         `UPDATE reservaciones SET monto_pagado = monto_pagado + $1,
           estado = CASE WHEN monto_pagado + $1 >= monto_total THEN 'pagada' ELSE 'confirmada' END
-        WHERE id = $2 AND estado IN ('pendiente', 'confirmada')`,
+        WHERE id = $2 AND estado IN ('pendiente', 'confirmada')
+        RETURNING estado`,
         [montoPago, reservacion.id]
       );
+
+      // Si quedó liquidada, enviar Pase de Abordar
+      if (updRes.rows.length > 0 && updRes.rows[0].estado === 'pagada') {
+        enviarPaseDeAbordar(reservacion.id);
+      }
     }
 
     res.json({
@@ -521,6 +615,64 @@ router.post('/apple-pay', async (req, res) => {
   } catch (err) {
     console.error('Error procesando Apple Pay:', err.description || err.message || err);
     res.status(500).json({ message: err.description || 'Error al procesar pago con Apple Pay' });
+  }
+});
+
+// GET /api/pagos/pase-abordar/:reservacionId — Datos completos para el Pase de Abordar digital
+router.get('/pase-abordar/:reservacionId', async (req, res) => {
+  try {
+    const { reservacionId } = req.params;
+
+    const { rows } = await pool.query(`
+      SELECT r.id, r.fecha_evento, r.hora_inicio, r.hora_fin, r.monto_total, r.monto_pagado,
+             r.num_invitados, r.estado, r.notas,
+             c.nombre AS cliente_nombre, c.apellido AS cliente_apellido,
+             c.email AS cliente_email, c.telefono,
+             p.nombre AS paquete_nombre, p.capacidad_max, p.tipo_duracion,
+             ca.codigo_pin, ca.valido_desde, ca.valido_hasta
+      FROM reservaciones r
+      JOIN clientes c ON r.cliente_id = c.id
+      JOIN paquetes p ON r.paquete_id = p.id
+      LEFT JOIN codigos_acceso ca ON r.id = ca.reservacion_id AND ca.activo = TRUE
+      WHERE r.id = $1
+    `, [reservacionId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Reservación no encontrada' });
+    }
+
+    const r = rows[0];
+
+    // Obtener extras de la reservación
+    const { rows: extras } = await pool.query(`
+      SELECT e.nombre, e.emoji, re.cantidad, re.subtotal
+      FROM reservacion_extras re
+      JOIN extras e ON re.extra_id = e.id
+      WHERE re.reservacion_id = $1
+    `, [reservacionId]);
+
+    res.json({
+      reservacion_id: r.id,
+      estado: r.estado,
+      cliente_nombre: `${r.cliente_nombre} ${r.cliente_apellido || ''}`.trim(),
+      cliente_email: r.cliente_email,
+      paquete_nombre: r.paquete_nombre,
+      tipo_duracion: r.tipo_duracion,
+      fecha_evento: r.fecha_evento,
+      hora_inicio: r.hora_inicio,
+      hora_fin: r.hora_fin,
+      capacidad: r.capacidad_max || r.num_invitados,
+      monto_total: r.monto_total,
+      monto_pagado: r.monto_pagado,
+      codigo_pin: r.codigo_pin || null,
+      pin_valido_desde: r.valido_desde || null,
+      pin_valido_hasta: r.valido_hasta || null,
+      extras,
+      google_maps_link: process.env.GOOGLE_MAPS_LINK || 'https://maps.app.goo.gl/quintadeali',
+    });
+  } catch (err) {
+    console.error('Error obteniendo pase de abordar:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
   }
 });
 
