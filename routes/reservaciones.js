@@ -261,7 +261,7 @@ router.patch('/:id/estado', adminAuth, async (req, res) => {
 router.post('/completa', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { nombre, apellido, telefono, email, google_id, es_invitado, paquete_id, fecha_evento, hora_inicio, num_invitados, notas, extras, ine_url } = req.body;
+    const { nombre, apellido, telefono, email, google_id, es_invitado, paquete_id, fecha_evento, hora_inicio, num_invitados, notas, extras, ine_url, promotor } = req.body;
 
     if (!nombre || !email || !paquete_id || !fecha_evento || !hora_inicio) {
       return res.status(400).json({ message: 'Faltan campos obligatorios' });
@@ -333,10 +333,10 @@ router.post('/completa', async (req, res) => {
 
     // 5. Crear reservación (trigger verifica empalmes)
     const { rows } = await client.query(
-      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url, promotor)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [clienteId, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null]
+      [clienteId, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null, promotor || null]
     );
 
     const reservacionId = rows[0].id;

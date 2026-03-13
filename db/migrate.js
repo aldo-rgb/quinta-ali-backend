@@ -81,6 +81,12 @@ async function migrate() {
     `);
     console.log('✅ Columna ine_url verificada');
 
+    // Agregar columna promotor a reservaciones si no existe
+    await client.query(`
+      ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS promotor VARCHAR(50)
+    `);
+    console.log('✅ Columna promotor verificada');
+
     // Insertar extras iniciales
     const { rows } = await client.query('SELECT COUNT(*) FROM extras');
     if (parseInt(rows[0].count) === 0) {
