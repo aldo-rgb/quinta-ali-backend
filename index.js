@@ -38,6 +38,7 @@ app.use('/api/precios', require('./routes/precios'));
 app.use('/api/reportes', require('./routes/reportes'));
 app.use('/api/terminal', require('./routes/terminal'));
 app.use('/api/corporativo', require('./routes/corporativo'));
+app.use('/api/promotores', require('./routes/promotores'));
 
 // Ruta de prueba
 app.get('/', (req, res) => {

@@ -87,6 +87,37 @@ async function migrate() {
     `);
     console.log('✅ Columna promotor verificada');
 
+    // Agregar columna promotor_id a reservaciones
+    await client.query(`
+      ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS promotor_id INT
+    `);
+    console.log('✅ Columna promotor_id verificada');
+
+    // Tabla de promotores
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS promotores (
+        id                  SERIAL PRIMARY KEY,
+        nombre              VARCHAR(100) NOT NULL,
+        email               VARCHAR(255) UNIQUE NOT NULL,
+        password_hash       VARCHAR(255) NOT NULL,
+        codigo_ref          VARCHAR(50) UNIQUE NOT NULL,
+        comision_porcentaje DECIMAL(5,2) DEFAULT 10.00,
+        activo              BOOLEAN DEFAULT TRUE,
+        creado_en           TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla promotores creada');
+
+    // Tabla de clicks de promotores
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS clicks_promotor (
+        id            SERIAL PRIMARY KEY,
+        promotor_id   INT NOT NULL REFERENCES promotores(id) ON DELETE CASCADE,
+        creado_en     TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla clicks_promotor creada');
+
     // Insertar extras iniciales
     const { rows } = await client.query('SELECT COUNT(*) FROM extras');
     if (parseInt(rows[0].count) === 0) {

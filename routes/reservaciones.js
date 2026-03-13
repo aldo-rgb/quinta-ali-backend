@@ -331,12 +331,24 @@ router.post('/completa', async (req, res) => {
       montoTotalDinamico = montoTotal;
     }
 
+    // 4b. Resolver promotor_id si viene código de promotor
+    let promotorId = null;
+    if (promotor) {
+      const promRes = await client.query(
+        'SELECT id FROM promotores WHERE codigo_ref = $1 AND activo = TRUE',
+        [promotor]
+      );
+      if (promRes.rows.length > 0) {
+        promotorId = promRes.rows[0].id;
+      }
+    }
+
     // 5. Crear reservación (trigger verifica empalmes)
     const { rows } = await client.query(
-      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url, promotor)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url, promotor, promotor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [clienteId, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null, promotor || null]
+      [clienteId, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null, promotor || null, promotorId]
     );
 
     const reservacionId = rows[0].id;
