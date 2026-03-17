@@ -257,6 +257,38 @@ router.patch('/:id/estado', adminAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/reservaciones/:id/checkin — Registrar check-in
+router.patch('/:id/checkin', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await pool.query(
+      `UPDATE reservaciones SET checkin_at = NOW(), actualizado_en = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Reservación no encontrada' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error registrando check-in:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
+// PATCH /api/reservaciones/:id/checkout — Registrar check-out
+router.patch('/:id/checkout', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await pool.query(
+      `UPDATE reservaciones SET checkout_at = NOW(), estado = 'completada', actualizado_en = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Reservación no encontrada' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error registrando check-out:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
 // POST /api/reservaciones/completa — Flujo completo: crear cliente + reservación en un solo request
 router.post('/completa', async (req, res) => {
   const client = await pool.connect();

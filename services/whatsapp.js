@@ -206,6 +206,41 @@ async function enviarPaseAbordar(datos) {
   return enviarMensaje(telefono, texto);
 }
 
+/**
+ * Recordatorio 24h antes del evento
+ */
+async function enviarRecordatorio(telefono, nombre, fecha, horaInicio, horaFin, paqueteNombre) {
+  const GOOGLE_MAPS_LINK = process.env.GOOGLE_MAPS_LINK || 'https://maps.app.goo.gl/quintadeali';
+
+  const diasSemana = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const d = new Date(fecha + 'T12:00:00');
+  const fechaFormateada = `${diasSemana[d.getDay()]} ${d.getDate()} de ${meses[d.getMonth()]} ${d.getFullYear()}`;
+
+  const horaSalida = horaFin === '23:59' ? '11:00 AM (día siguiente)' : `${horaFin} hrs`;
+
+  const texto =
+    `🔔 *¡Mañana es tu evento, ${nombre}!*\n\n` +
+    `📦 *Paquete:* ${paqueteNombre}\n` +
+    `🗓 *Fecha:* ${fechaFormateada}\n` +
+    `🕐 *Horario:* ${horaInicio} — ${horaSalida}\n` +
+    `📍 *Ubicación:* ${GOOGLE_MAPS_LINK}\n\n` +
+    `📋 *Reglas importantes:*\n` +
+    `• No se permite fumar dentro de las habitaciones\n` +
+    `• Respetar el horario de salida\n` +
+    `• Reportar cualquier daño o incidente\n` +
+    `• Mantener el volumen moderado después de las 11 PM\n` +
+    `• La alberca se usa bajo tu responsabilidad\n\n` +
+    `💡 *Tips:*\n` +
+    `• Llega 15 min antes para acomodarte\n` +
+    `• Si necesitas hielo, carbón o leña, escríbenos\n` +
+    `• Tu código de acceso se activará a la hora de entrada\n\n` +
+    `¡Que la pasen increíble! 🎉\n` +
+    `— *La Quinta de Alí*`;
+
+  return enviarMensaje(telefono, texto);
+}
+
 module.exports = {
   enviarMensaje,
   enviarBotones,
@@ -213,4 +248,5 @@ module.exports = {
   notificarNuevaReservacion,
   confirmarReservacionCliente,
   enviarPaseAbordar,
+  enviarRecordatorio,
 };

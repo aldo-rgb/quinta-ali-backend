@@ -1,7 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const cron = require('node-cron');
 const adminAuth = require('./middleware/adminAuth');
+const { enviarRecordatorios } = require('./services/recordatorios');
 
 const app = express();
 const PORT = process.env.PORT || 3001; // 3001 para no chocar con Next.js en 3000
@@ -59,4 +61,11 @@ app.get('/api/health', async (req, res) => {
 // Levantar el servidor
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
+
+  // Cron: Recordatorios WhatsApp todos los días a las 10:00 AM (hora México)
+  cron.schedule('0 10 * * *', () => {
+    console.log('⏰ Ejecutando cron de recordatorios...');
+    enviarRecordatorios();
+  }, { timezone: 'America/Monterrey' });
+  console.log('📬 Cron de recordatorios WhatsApp activo (diario 10:00 AM)');
 });

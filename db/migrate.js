@@ -81,6 +81,15 @@ async function migrate() {
     `);
     console.log('✅ Columna ine_url verificada');
 
+    // Columnas de check-in / check-out
+    await client.query(`
+      ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS checkin_at TIMESTAMP
+    `);
+    await client.query(`
+      ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS checkout_at TIMESTAMP
+    `);
+    console.log('✅ Columnas checkin_at / checkout_at verificadas');
+
     // Agregar columna promotor a reservaciones si no existe
     await client.query(`
       ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS promotor VARCHAR(50)
