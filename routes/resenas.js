@@ -5,7 +5,7 @@ const whatsapp = require('../services/whatsapp');
 
 const router = Router();
 
-const GOOGLE_MAPS_REVIEW_LINK = process.env.GOOGLE_MAPS_REVIEW_LINK || 'https://g.page/r/quinta-de-ali/review';
+const GOOGLE_MAPS_REVIEW_LINK = process.env.GOOGLE_MAPS_REVIEW_LINK || 'https://maps.app.goo.gl/jkPUUQLCwfqbqzSP6';
 
 // GET /api/resenas — Listar todas las reseñas (admin)
 router.get('/', adminAuth, async (req, res) => {
