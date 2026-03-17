@@ -27,9 +27,10 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Email y contraseña requeridos' });
     }
 
+    // Aceptar email o código de referencia
     const { rows } = await pool.query(
-      'SELECT * FROM promotores WHERE email = $1 AND activo = TRUE',
-      [email]
+      'SELECT * FROM promotores WHERE (email = $1 OR codigo_ref = $1) AND activo = TRUE',
+      [email.toLowerCase().trim()]
     );
     if (rows.length === 0) {
       return res.status(401).json({ message: 'Credenciales incorrectas' });
