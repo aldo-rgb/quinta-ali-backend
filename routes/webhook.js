@@ -45,6 +45,24 @@ router.post('/', async (req, res) => {
     const mensaje = change.messages[0];
     const telefono = mensaje.from; // Número del remitente
 
+    // Detectar respuesta interactiva de lista (calificación reseñas)
+    if (mensaje.type === 'interactive' && mensaje.interactive?.type === 'list_reply') {
+      const rowId = mensaje.interactive.list_reply.id; // ej: 'cal_5'
+      if (rowId && rowId.startsWith('cal_')) {
+        const calificacion = rowId.replace('cal_', '');
+        try {
+          await fetch(`http://localhost:${process.env.PORT || 3001}/api/resenas/procesar-respuesta`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telefono, calificacion }),
+          });
+        } catch (e) {
+          console.error('Error procesando calificación interactiva:', e.message);
+        }
+        return;
+      }
+    }
+
     // Solo procesar mensajes de texto
     if (mensaje.type !== 'text') {
       await whatsapp.enviarMensaje(
@@ -56,7 +74,7 @@ router.post('/', async (req, res) => {
 
     const textoUsuario = mensaje.text.body;
 
-    // Detectar si es una respuesta de calificación (1-5) para el sistema de reseñas
+    // Detectar si es una respuesta de calificación (1-5) por texto para el sistema de reseñas
     const textoLimpio = textoUsuario.trim();
     if (/^[1-5]$/.test(textoLimpio)) {
       try {
@@ -67,7 +85,7 @@ router.post('/', async (req, res) => {
         });
         const data = await resenaRes.json();
         if (data.procesado) {
-          return; // Ya se envió respuesta desde la ruta de reseñas
+          return;
         }
       } catch (e) {
         // No era una reseña, continuar con el bot normal

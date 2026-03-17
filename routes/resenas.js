@@ -61,15 +61,24 @@ router.post('/enviar-solicitud', async (req, res) => {
       [reservacion_id, cliente_id]
     );
 
-    // Enviar mensaje por WhatsApp
-    const mensaje =
-      `¡Hola ${nombre}! 🎉\n\n` +
-      `Esperamos que se la hayan pasado increíble en *La Quinta de Alí*.\n\n` +
-      `Del 1 al 5, ¿qué calificación le pondrías a tu experiencia? ⭐\n\n` +
-      `Responde con un número (1-5)`;
-
+    // Enviar lista interactiva de calificación por WhatsApp
     const telFormateado = tel.startsWith('52') ? tel : `52${tel.replace(/\D/g, '')}`;
-    await whatsapp.enviarMensaje(telFormateado, mensaje);
+    await whatsapp.enviarLista(
+      telFormateado,
+      '⭐ ¿Cómo estuvo tu evento?',
+      `¡Hola ${nombre}! 👋 Esperamos que te hayas recuperado de la fiesta y que tu evento haya sido espectacular.\n\nPara nosotros es súper importante mejorar. ¿Qué calificación le darías a tu experiencia en La Quinta de Alí?`,
+      'Calificar ⭐',
+      [{
+        title: 'Tu calificación',
+        rows: [
+          { id: 'cal_5', title: '⭐⭐⭐⭐⭐ 5 Estrellas', description: '¡Increíble, vuelvo pronto!' },
+          { id: 'cal_4', title: '⭐⭐⭐⭐ 4 Estrellas', description: 'Muy bien, detalles mínimos.' },
+          { id: 'cal_3', title: '⭐⭐⭐ 3 Estrellas', description: 'Regular, hay cosas por mejorar.' },
+          { id: 'cal_2', title: '⭐⭐ 2 Estrellas', description: 'Mala experiencia.' },
+          { id: 'cal_1', title: '⭐ 1 Estrella', description: 'Pésimo.' },
+        ],
+      }]
+    );
 
     res.json({ message: 'Solicitud de reseña enviada', telefono: telFormateado });
   } catch (err) {
@@ -115,41 +124,50 @@ router.post('/procesar-respuesta', async (req, res) => {
 
     const resena = result.rows[0];
 
+    // Obtener nombre del cliente
+    const clienteRes = await pool.query(
+      'SELECT c.nombre FROM resenas re JOIN clientes c ON re.cliente_id = c.id WHERE re.id = $1',
+      [resena.id]
+    );
+    const nombreCliente = clienteRes.rows[0]?.nombre || 'amigo';
+
     if (cal >= 4) {
-      // Calificación positiva: enviar link de Google Maps
+      // ESCENARIO A: Clientes Felices (Promotores)
       await pool.query(
         'UPDATE resenas SET link_enviado = TRUE WHERE id = $1',
         [resena.id]
       );
       await whatsapp.enviarMensaje(
         telefono,
-        `¡Qué alegría saber eso! 😍\n\n` +
-        `¿Nos regalarías 1 minutito para poner esas ⭐ estrellas en Google Maps?\n\n` +
+        `¡Qué alegría leer esto, ${nombreCliente}! 😍 Nos motiva muchísimo.\n\n` +
+        `¿Nos harías un favor enorme? Ayúdanos dejando tu reseña en Google Maps para que más familias nos conozcan. Te toma 10 segundos:\n\n` +
         `👉 ${GOOGLE_MAPS_REVIEW_LINK}\n\n` +
-        `¡Nos ayudaría muchísimo! Gracias 🙏`
+        `¡Te esperamos en tu próxima carne asada con un descuento especial! 🥩🔥`
       );
     } else {
-      // Calificación negativa: alerta al admin, NO enviar link
+      // ESCENARIO B: Clientes Inconformes (Detractores)
       await pool.query(
         'UPDATE resenas SET alerta_enviada = TRUE WHERE id = $1',
         [resena.id]
       );
 
+      // Mensaje empático al cliente — NO se le da link de Google
+      await whatsapp.enviarMensaje(
+        telefono,
+        `Hola ${nombreCliente}, lamentamos muchísimo que no hayamos cumplido tus expectativas al 100%. 😔\n\n` +
+        `El dueño revisa personalmente estos casos. Por favor, cuéntanos brevemente qué falló para solucionarlo y que no vuelva a pasar.\n\n` +
+        `Puedes escribirlo aquí mismo en este chat. Tu mensaje será leído personalmente. 🙏`
+      );
+
+      // Alerta silenciosa al jefe
       const adminTelefono = process.env.ADMIN_WHATSAPP || '528149060693';
       await whatsapp.enviarMensaje(
         adminTelefono,
-        `⚠️ *ALERTA: Reseña negativa*\n\n` +
-        `Un cliente calificó su experiencia con *${cal}/5* ⭐\n` +
+        `🚨 *ALERTA ROJA: Reseña negativa*\n\n` +
+        `El cliente *${nombreCliente}* calificó con *${cal}/5* ⭐\n` +
         `📱 Teléfono: ${telefono}\n` +
         `📋 Reservación #${resena.reservacion_id}\n\n` +
-        `Comunicarse de inmediato para resolver.`
-      );
-
-      await whatsapp.enviarMensaje(
-        telefono,
-        `Lamentamos mucho escuchar eso 😔\n\n` +
-        `Un gerente se comunicará contigo de inmediato para resolverlo.\n\n` +
-        `Tu opinión es muy importante para nosotros. ¡Gracias por la retroalimentación!`
+        `⚡ *¡Háblale antes de que vaya a Google/Facebook!*`
       );
     }
 

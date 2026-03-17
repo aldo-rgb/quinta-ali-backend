@@ -68,4 +68,18 @@ app.listen(PORT, () => {
     enviarRecordatorios();
   }, { timezone: 'America/Monterrey' });
   console.log('📬 Cron de recordatorios WhatsApp activo (diario 10:00 AM)');
+
+  // Cron: Solicitudes de reseña todos los días a las 12:00 PM (hora México)
+  cron.schedule('0 12 * * *', async () => {
+    console.log('⭐ Ejecutando cron de reseñas...');
+    try {
+      await fetch(`http://localhost:${PORT}/api/resenas/cron`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (e) {
+      console.error('Error en cron de reseñas:', e.message);
+    }
+  }, { timezone: 'America/Monterrey' });
+  console.log('⭐ Cron de reseñas WhatsApp activo (diario 12:00 PM)');
 });
