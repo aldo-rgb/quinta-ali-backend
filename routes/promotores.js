@@ -200,9 +200,9 @@ router.get('/', adminAuth, async (req, res) => {
 // POST /api/promotores — Crear promotor (admin)
 router.post('/', adminAuth, async (req, res) => {
   try {
-    const { nombre, email, password, codigo_ref, comision_porcentaje } = req.body;
-    if (!nombre || !email || !password || !codigo_ref) {
-      return res.status(400).json({ message: 'Nombre, email, contraseña y código de referido requeridos' });
+    const { nombre, codigo_ref, comision_porcentaje } = req.body;
+    if (!nombre || !codigo_ref) {
+      return res.status(400).json({ message: 'Nombre y código de referido requeridos' });
     }
 
     // Validar código_ref: solo letras, números, guiones
@@ -210,19 +210,23 @@ router.post('/', adminAuth, async (req, res) => {
       return res.status(400).json({ message: 'El código de referido solo puede tener letras, números, guiones y guiones bajos' });
     }
 
+    const ref = codigo_ref.toLowerCase();
+    const email = req.body.email || `${ref}@promotor.quintadeali.com`;
+    const password = req.body.password || ref + '2026';
+
     const existente = await pool.query(
       'SELECT id FROM promotores WHERE email = $1 OR codigo_ref = $2',
-      [email, codigo_ref]
+      [email, ref]
     );
     if (existente.rows.length > 0) {
-      return res.status(409).json({ message: 'Ya existe un promotor con ese email o código' });
+      return res.status(409).json({ message: 'Ya existe un promotor con ese código' });
     }
 
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
       `INSERT INTO promotores (nombre, email, password_hash, codigo_ref, comision_porcentaje)
        VALUES ($1, $2, $3, $4, $5) RETURNING id, nombre, email, codigo_ref, comision_porcentaje`,
-      [nombre, email, hash, codigo_ref.toLowerCase(), comision_porcentaje || 10]
+      [nombre, email, hash, ref, comision_porcentaje || 10]
     );
 
     res.status(201).json(rows[0]);
