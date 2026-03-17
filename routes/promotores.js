@@ -252,6 +252,18 @@ router.patch('/:id', adminAuth, async (req, res) => {
   }
 });
 
+// DELETE /api/promotores/:id — Eliminar promotor (admin)
+router.delete('/:id', adminAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query('DELETE FROM promotores WHERE id = $1 RETURNING id, nombre', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ message: 'Promotor no encontrado' });
+    res.json({ message: `Promotor ${rows[0].nombre} eliminado` });
+  } catch (err) {
+    console.error('Error eliminando promotor:', err.message);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+
 // GET /api/promotores/admin/stats — Estadísticas generales (jefe)
 router.get('/admin/stats', adminAuth, async (req, res) => {
   try {
