@@ -52,7 +52,7 @@ router.get('/stats', adminAuth, async (req, res) => {
     const hoy = new Date().toISOString().split('T')[0];
     const inicioMes = hoy.substring(0, 7) + '-01';
 
-    const [totalRes, resHoy, pendientes, ingresosMes, extrasMes, topExtras] = await Promise.all([
+    const [totalRes, resHoy, pendientes, ingresosMes, extrasMes, topExtras, terminalMes] = await Promise.all([
       pool.query("SELECT COUNT(*) FROM reservaciones WHERE estado = 'confirmada'"),
       pool.query("SELECT COUNT(*) FROM reservaciones WHERE fecha_evento::date = $1 AND estado NOT IN ('cancelada')", [hoy]),
       pool.query("SELECT COUNT(*) FROM reservaciones WHERE estado = 'cancelada'"),
@@ -74,14 +74,20 @@ router.get('/stats', adminAuth, async (req, res) => {
          GROUP BY e.id, e.nombre, e.emoji
          ORDER BY veces DESC LIMIT 5`
       ),
+      pool.query(
+        `SELECT COALESCE(SUM(monto), 0) as total
+         FROM pagos_terminal
+         WHERE estado = 'pagado' AND creado_en >= $1`, [inicioMes]
+      ),
     ]);
 
     res.json({
       total_reservaciones: Number(totalRes.rows[0].count),
       reservaciones_hoy: Number(resHoy.rows[0].count),
       pendientes: Number(pendientes.rows[0].count),
-      ingresos_mes: Number(ingresosMes.rows[0].total),
+      ingresos_mes: Number(ingresosMes.rows[0].total) + Number(terminalMes.rows[0].total),
       ingresos_extras_mes: Number(extrasMes.rows[0].total),
+      ingresos_terminal_mes: Number(terminalMes.rows[0].total),
       top_extras: topExtras.rows,
     });
   } catch (err) {

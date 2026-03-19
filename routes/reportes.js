@@ -122,7 +122,7 @@ router.get('/resumen', adminAuth, async (req, res) => {
     const mesAnterior = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().substring(0, 7) + '-01';
     const finMesAnterior = mesActual;
 
-    const [totalRes, totalIngresos, ticketPromedio, mesCurrent, mesPrev, totalClientes, tasaCancelacion] = await Promise.all([
+    const [totalRes, totalIngresos, ticketPromedio, mesCurrent, mesPrev, totalClientes, tasaCancelacion, terminalTotal, terminalMesActual, terminalMesPrev] = await Promise.all([
       pool.query("SELECT COUNT(*) FROM reservaciones WHERE estado NOT IN ('cancelada')"),
       pool.query("SELECT COALESCE(SUM(monto_total), 0) AS total FROM reservaciones WHERE estado NOT IN ('cancelada')"),
       pool.query("SELECT COALESCE(AVG(monto_total), 0) AS promedio FROM reservaciones WHERE estado NOT IN ('cancelada')"),
@@ -142,10 +142,20 @@ router.get('/resumen', adminAuth, async (req, res) => {
            COUNT(*) AS total
          FROM reservaciones`
       ),
+      pool.query("SELECT COALESCE(SUM(monto), 0) AS total FROM pagos_terminal WHERE estado = 'pagado'"),
+      pool.query(
+        `SELECT COALESCE(SUM(monto), 0) AS total FROM pagos_terminal
+         WHERE estado = 'pagado' AND creado_en >= $1`, [mesActual]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(monto), 0) AS total FROM pagos_terminal
+         WHERE estado = 'pagado' AND creado_en >= $1 AND creado_en < $2`,
+        [mesAnterior, finMesAnterior]
+      ),
     ]);
 
-    const ingresosMesActual = Number(mesCurrent.rows[0].total);
-    const ingresosMesPasado = Number(mesPrev.rows[0].total);
+    const ingresosMesActual = Number(mesCurrent.rows[0].total) + Number(terminalMesActual.rows[0].total);
+    const ingresosMesPasado = Number(mesPrev.rows[0].total) + Number(terminalMesPrev.rows[0].total);
     const variacion = ingresosMesPasado > 0
       ? ((ingresosMesActual - ingresosMesPasado) / ingresosMesPasado * 100).toFixed(1)
       : null;
@@ -157,7 +167,8 @@ router.get('/resumen', adminAuth, async (req, res) => {
 
     res.json({
       total_reservaciones: Number(totalRes.rows[0].count),
-      ingresos_totales: Number(totalIngresos.rows[0].total),
+      ingresos_totales: Number(totalIngresos.rows[0].total) + Number(terminalTotal.rows[0].total),
+      ingresos_terminal: Number(terminalTotal.rows[0].total),
       ticket_promedio: Number(Number(ticketPromedio.rows[0].promedio).toFixed(2)),
       ingresos_mes_actual: ingresosMesActual,
       ingresos_mes_anterior: ingresosMesPasado,
