@@ -41,6 +41,8 @@ router.post('/cobrar', adminAuth, async (req, res) => {
           description: descripcion,
           payment: {
             type: 'credit_card',
+            installments: 1,
+            installments_cost: 'seller',
           },
           additional_info: {
             external_reference: externalRef,
