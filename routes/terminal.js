@@ -19,8 +19,8 @@ router.post('/cobrar', adminAuth, async (req, res) => {
     if (!monto || monto <= 0) {
       return res.status(400).json({ message: 'El monto debe ser mayor a 0' });
     }
-    if (!descripcion) {
-      return res.status(400).json({ message: 'La descripción es requerida' });
+    if (monto < 5) {
+      return res.status(400).json({ message: 'El monto mínimo es $5 MXN' });
     }
 
     const externalRef = reservacion_id
@@ -28,6 +28,7 @@ router.post('/cobrar', adminAuth, async (req, res) => {
       : `QDA-EXTRA-${Date.now()}`;
 
     // Crear payment intent en Mercado Pago Point
+    // La API Point solo acepta: amount (centavos) + additional_info
     const mpResponse = await fetch(
       `https://api.mercadopago.com/point/integration-api/devices/${MP_DEVICE_ID}/payment-intents`,
       {
@@ -38,12 +39,6 @@ router.post('/cobrar', adminAuth, async (req, res) => {
         },
         body: JSON.stringify({
           amount: Math.round(monto * 100), // Mercado Pago espera centavos
-          description: descripcion,
-          payment: {
-            type: 'credit_card',
-            installments: 1,
-            installments_cost: 'seller',
-          },
           additional_info: {
             external_reference: externalRef,
             print_on_terminal: true,
