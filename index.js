@@ -36,6 +36,7 @@ app.use('/api/cerraduras', require('./routes/cerraduras'));
 app.use('/api/resenas', require('./routes/resenas'));
 app.use('/api/notificaciones', require('./routes/notificaciones'));
 app.use('/api/pagos', require('./routes/pagos'));
+app.use('/api/mercadopago', require('./routes/mercadopago'));
 app.use('/api/precios', require('./routes/precios'));
 app.use('/api/reportes', require('./routes/reportes'));
 app.use('/api/terminal', require('./routes/terminal'));
