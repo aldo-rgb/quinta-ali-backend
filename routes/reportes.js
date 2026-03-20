@@ -12,7 +12,7 @@ router.get('/ingresos-mensuales', adminAuth, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT
          TO_CHAR(r.fecha_evento, 'YYYY-MM') AS mes,
-         COALESCE(SUM(r.monto_total), 0) AS ingresos_reservaciones,
+         COALESCE(SUM(r.monto_pagado), 0) AS ingresos_reservaciones,
          COALESCE(SUM(sub.extras_total), 0) AS ingresos_extras
        FROM reservaciones r
        LEFT JOIN (
@@ -39,7 +39,7 @@ router.get('/paquetes-populares', adminAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT p.nombre, p.emoji, COUNT(r.id) AS total_reservaciones,
-              COALESCE(SUM(r.monto_total), 0) AS ingresos
+              COALESCE(SUM(r.monto_pagado), 0) AS ingresos
        FROM reservaciones r
        JOIN paquetes p ON r.paquete_id = p.id
        WHERE r.estado NOT IN ('cancelada')
@@ -124,14 +124,14 @@ router.get('/resumen', adminAuth, async (req, res) => {
 
     const [totalRes, totalIngresos, ticketPromedio, mesCurrent, mesPrev, totalClientes, tasaCancelacion, terminalTotal, terminalMesActual, terminalMesPrev] = await Promise.all([
       pool.query("SELECT COUNT(*) FROM reservaciones WHERE estado NOT IN ('cancelada')"),
-      pool.query("SELECT COALESCE(SUM(monto_total), 0) AS total FROM reservaciones WHERE estado NOT IN ('cancelada')"),
+      pool.query("SELECT COALESCE(SUM(monto_pagado), 0) AS total FROM reservaciones WHERE estado NOT IN ('cancelada')"),
       pool.query("SELECT COALESCE(AVG(monto_total), 0) AS promedio FROM reservaciones WHERE estado NOT IN ('cancelada')"),
       pool.query(
-        `SELECT COALESCE(SUM(monto_total), 0) AS total FROM reservaciones
+        `SELECT COALESCE(SUM(monto_pagado), 0) AS total FROM reservaciones
          WHERE fecha_evento >= $1 AND estado NOT IN ('cancelada')`, [mesActual]
       ),
       pool.query(
-        `SELECT COALESCE(SUM(monto_total), 0) AS total FROM reservaciones
+        `SELECT COALESCE(SUM(monto_pagado), 0) AS total FROM reservaciones
          WHERE fecha_evento >= $1 AND fecha_evento < $2 AND estado NOT IN ('cancelada')`,
         [mesAnterior, finMesAnterior]
       ),
