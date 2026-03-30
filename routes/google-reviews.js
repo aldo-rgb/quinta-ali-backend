@@ -69,12 +69,20 @@ router.get('/', async (req, res) => {
         fecha: r.time
       }));
 
-    // Traducir todos los textos al español en paralelo
+    // Traducir textos en paralelo (con timeout)
     reviews = await Promise.all(
-      reviews.map(async (review) => ({
-        ...review,
-        texto: await traducirAlEspanol(review.texto)
-      }))
+      reviews.map(async (review) => {
+        try {
+          const traducido = await Promise.race([
+            traducirAlEspanol(review.texto),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+          ]);
+          return { ...review, texto: traducido };
+        } catch (err) {
+          // Si falla o timeout, devolver el original
+          return review;
+        }
+      })
     );
 
     res.json({
