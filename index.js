@@ -42,6 +42,7 @@ app.use('/api/reportes', require('./routes/reportes'));
 app.use('/api/terminal', require('./routes/terminal'));
 app.use('/api/corporativo', require('./routes/corporativo'));
 app.use('/api/promotores', require('./routes/promotores'));
+app.use('/api/google-reviews', require('./routes/google-reviews'));
 
 // Ruta de prueba
 app.get('/', (req, res) => {
