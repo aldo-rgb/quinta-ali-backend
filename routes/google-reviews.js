@@ -2,8 +2,26 @@ const express = require('express');
 const router = express.Router();
 
 /**
+ * Traduce un texto usando MyMemory API (gratuita)
+ */
+async function traducirAlEspanol(texto) {
+  try {
+    const response = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texto)}&langpair=en|es`
+    );
+    const data = await response.json();
+    if (data.responseStatus === 200 && data.responseData.translatedText) {
+      return data.responseData.translatedText;
+    }
+  } catch (err) {
+    console.error('Error traducing text:', err.message);
+  }
+  return texto; // Retornar original si falla la traducción
+}
+
+/**
  * GET /api/google-reviews
- * Obtiene las reviews de Google Places API
+ * Obtiene las reviews de Google Places API (traducidas al español)
  * Retorna array de reviews con: nombre, rating, texto, foto
  */
 router.get('/', async (req, res) => {
@@ -40,7 +58,7 @@ router.get('/', async (req, res) => {
     }
 
     // Procesar reviews
-    const reviews = (data.result.reviews || [])
+    let reviews = (data.result.reviews || [])
       .filter(r => r.rating >= 4) // Solo reviews de 4+ estrellas
       .slice(0, 6) // Máximo 6 reviews
       .map(r => ({
@@ -48,6 +66,32 @@ router.get('/', async (req, res) => {
         rating: r.rating,
         texto: r.text,
         foto: r.profile_photo_url,
+        fecha: r.time
+      }));
+
+    // Traducir todos los textos al español en paralelo
+    reviews = await Promise.all(
+      reviews.map(async (review) => ({
+        ...review,
+        texto: await traducirAlEspanol(review.texto)
+      }))
+    );
+
+    res.json({
+      total: reviews.length,
+      rating_promedio: data.result.rating,
+      reviews: reviews
+    });
+  } catch (err) {
+    console.error('Error en /api/google-reviews:', err);
+    res.status(500).json({
+      error: 'Error interno del servidor',
+      message: err.message
+    });
+  }
+});
+
+module.exports = router;
         fecha: r.time,
       }));
 
