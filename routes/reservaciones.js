@@ -466,16 +466,23 @@ router.delete('/:id', adminAuth, async (req, res) => {
 
     await client.query('BEGIN');
 
-    // 1. Eliminar extras de la reservación
+    // 1. Eliminar pagos asociados (mercadopago y terminal)
+    await client.query('DELETE FROM pagos_mercadopago WHERE reservacion_id = $1', [id]);
+    await client.query('DELETE FROM pagos_terminal WHERE reservacion_id = $1', [id]);
+
+    // 2. Eliminar códigos de acceso
+    await client.query('DELETE FROM codigos_acceso WHERE reservacion_id = $1', [id]);
+
+    // 3. Eliminar extras de la reservación
     await client.query('DELETE FROM reservacion_extras WHERE reservacion_id = $1', [id]);
 
-    // 2. Eliminar firmas de la reservación
+    // 4. Eliminar firmas de la reservación
     await client.query('DELETE FROM firmas_reglamento WHERE reservacion_id = $1', [id]);
 
-    // 3. Eliminar reseñas de la reservación
+    // 5. Eliminar reseñas de la reservación
     await client.query('DELETE FROM resenas WHERE reservacion_id = $1', [id]);
 
-    // 4. Eliminar la reservación
+    // 6. Eliminar la reservación
     await client.query('DELETE FROM reservaciones WHERE id = $1', [id]);
 
     // 5. Opcional: Eliminar cliente si no tiene más reservaciones
