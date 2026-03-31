@@ -132,21 +132,8 @@ router.get('/', async (req, res) => {
         fecha: r.time
       }));
 
-    // Traducir textos en paralelo (con timeout)
-    reviews = await Promise.all(
-      reviews.map(async (review) => {
-        try {
-          const traducido = await Promise.race([
-            traducirAlEspanol(review.texto),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
-          ]);
-          return { ...review, texto: traducido };
-        } catch (err) {
-          // Si falla o timeout, devolver el original
-          return review;
-        }
-      })
-    );
+    // Mostrar reviews tal cual aparecen en Google Maps sin modificarlas
+    // (Se removió la traducción automática para mostrar el texto exacto)
 
     res.json({
       total: reviews.length,
