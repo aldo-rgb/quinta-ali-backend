@@ -133,7 +133,7 @@ router.get('/calendario', async (req, res) => {
 
     // Obtener todas las reservaciones del mes (no canceladas)
     const { rows } = await pool.query(
-      `SELECT fecha_evento, hora_inicio, hora_fin, paquete_id, p.tipo_duracion
+      `SELECT fecha_evento, fecha_fin, hora_inicio, hora_fin, paquete_id, p.tipo_duracion
        FROM reservaciones r
        JOIN paquetes p ON r.paquete_id = p.id
        WHERE fecha_evento BETWEEN $1 AND $2 AND r.estado NOT IN ('cancelada')
@@ -142,15 +142,31 @@ router.get('/calendario', async (req, res) => {
     );
 
     // Agrupar por fecha: contar reservaciones y detectar si el día está lleno
-    // Un día está "lleno" si tiene un paquete de noche (Pijama Party) o 3+ reservaciones por día
     const porDia = {};
     for (const r of rows) {
-      const fecha = r.fecha_evento instanceof Date
+      const fechaInicio = r.fecha_evento instanceof Date
         ? r.fecha_evento.toISOString().split('T')[0]
         : String(r.fecha_evento).split('T')[0];
-      if (!porDia[fecha]) porDia[fecha] = { reservaciones: 0, tiene_noche: false };
-      porDia[fecha].reservaciones++;
-      if (r.tipo_duracion === 'noche') porDia[fecha].tiene_noche = true;
+      
+      // Si hay fecha_fin (para paquetes de noche con rango), ocupar todo el rango
+      let fechaFin = fechaInicio;
+      if (r.fecha_fin) {
+        fechaFin = r.fecha_fin instanceof Date
+          ? r.fecha_fin.toISOString().split('T')[0]
+          : String(r.fecha_fin).split('T')[0];
+      }
+
+      // Marcar todos los días del rango como ocupados
+      let fechaActual = new Date(fechaInicio);
+      const fechaFinDate = new Date(fechaFin);
+      
+      while (fechaActual <= fechaFinDate) {
+        const dateStr = fechaActual.toISOString().split('T')[0];
+        if (!porDia[dateStr]) porDia[dateStr] = { reservaciones: 0, tiene_noche: false };
+        porDia[dateStr].reservaciones++;
+        if (r.tipo_duracion === 'noche') porDia[dateStr].tiene_noche = true;
+        fechaActual.setDate(fechaActual.getDate() + 1);
+      }
     }
 
     // Construir respuesta: array de { fecha, reservaciones, disponible }
