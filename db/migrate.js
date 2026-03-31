@@ -127,6 +127,12 @@ async function migrate() {
     `);
     console.log('✅ Tabla clicks_promotor creada');
 
+    // Añadir soporte para rangos de fecha en paquetes de noche
+    await client.query(`
+      ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS fecha_fin DATE
+    `);
+    console.log('✅ Columna fecha_fin verificada');
+
     // Insertar extras iniciales
     const { rows } = await client.query('SELECT COUNT(*) FROM extras');
     if (parseInt(rows[0].count) === 0) {

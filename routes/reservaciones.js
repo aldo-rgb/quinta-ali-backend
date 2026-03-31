@@ -299,7 +299,7 @@ router.patch('/:id/checkout', adminAuth, async (req, res) => {
 router.post('/completa', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { nombre, apellido, telefono, email, google_id, es_invitado, paquete_id, fecha_evento, hora_inicio, num_invitados, notas, extras, ine_url, promotor } = req.body;
+    const { nombre, apellido, telefono, email, google_id, es_invitado, paquete_id, fecha_evento, fecha_fin, hora_inicio, num_invitados, notas, extras, ine_url, promotor } = req.body;
 
     if (!nombre || !email || !paquete_id || !fecha_evento || !hora_inicio) {
       return res.status(400).json({ message: 'Faltan campos obligatorios' });
@@ -350,23 +350,45 @@ router.post('/completa', async (req, res) => {
       hora_fin = `${String(Math.min(finH, 23)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     }
 
-    // 4. Calcular total con extras
+    // 4. Calcular total con extras y precio dinámico
     let montoExtras = 0;
     if (extras && extras.length > 0) {
       for (const ex of extras) {
         montoExtras += Number(ex.precio) * (ex.cantidad || 1);
       }
     }
-    const montoTotal = Number(paquete.precio) + montoExtras;
 
-    // Aplicar precio dinámico
-    const reglasRes = await client.query('SELECT * FROM reglas_precio_dinamico WHERE activo = TRUE');
+    // Para paquetes de noche con rango: sumar precios de cada día
     let montoTotalDinamico;
-    if (reglasRes.rows.length > 0) {
-      const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglasRes.rows);
-      montoTotalDinamico = calc.precioFinal + montoExtras;
+    const reglasRes = await client.query('SELECT * FROM reglas_precio_dinamico WHERE activo = TRUE');
+    
+    if (paquete.tipo_duracion === 'noche' && fecha_fin && fecha_fin !== fecha_evento) {
+      // Rango de múltiples noches: sumar precio de cada día
+      let totalPrecio = 0;
+      const inicio = new Date(fecha_evento);
+      const fin = new Date(fecha_fin);
+      let fechaActual = new Date(inicio);
+      
+      while (fechaActual <= fin) {
+        const dateStr = fechaActual.toISOString().split('T')[0];
+        if (reglasRes.rows.length > 0) {
+          const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), dateStr, reglasRes.rows);
+          totalPrecio += calc.precioFinal;
+        } else {
+          totalPrecio += Number(paquete.precio);
+        }
+        fechaActual.setDate(fechaActual.getDate() + 1);
+      }
+      montoTotalDinamico = totalPrecio + montoExtras;
     } else {
-      montoTotalDinamico = montoTotal;
+      // Precio único (paquete de horas o una sola noche)
+      const montoTotal = Number(paquete.precio) + montoExtras;
+      if (reglasRes.rows.length > 0) {
+        const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglasRes.rows);
+        montoTotalDinamico = calc.precioFinal + montoExtras;
+      } else {
+        montoTotalDinamico = montoTotal;
+      }
     }
 
     // 4b. Resolver promotor_id si viene código de promotor
@@ -383,10 +405,10 @@ router.post('/completa', async (req, res) => {
 
     // 5. Crear reservación (trigger verifica empalmes)
     const { rows } = await client.query(
-      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url, promotor, promotor_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, fecha_fin, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url, promotor, promotor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [clienteId, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null, promotor || null, promotorId]
+      [clienteId, paquete_id, fecha_evento, fecha_fin || null, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null, promotor || null, promotorId]
     );
 
     const reservacionId = rows[0].id;
