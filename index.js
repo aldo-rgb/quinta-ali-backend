@@ -64,16 +64,41 @@ app.get('/api/health', async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
 
-  // Ejecutar migración de fecha_fin al iniciar
+  // Ejecutar migraciones al iniciar
   try {
     const pool = require('./db/connection');
+    
+    // Migración 1: fecha_fin en reservaciones
     await pool.query(`
       ALTER TABLE reservaciones 
       ADD COLUMN IF NOT EXISTS fecha_fin DATE
     `);
     console.log('✅ Columna fecha_fin verificada en reservaciones');
+
+    // Migración 2: reservacion_id en leads_corporativos
+    await pool.query(`
+      ALTER TABLE leads_corporativos 
+      ADD COLUMN IF NOT EXISTS reservacion_id INT REFERENCES reservaciones(id) ON DELETE SET NULL
+    `);
+    console.log('✅ Columna reservacion_id verificada en leads_corporativos');
+
+    // Migración 3: Actualizar CHECK constraint para leads_corporativos (si aún no incluye 'confirmado')
+    // Intentar agregar 'confirmado' al constraint (puede fallar si ya existe, eso es ok)
+    await pool.query(`
+      ALTER TABLE leads_corporativos 
+      DROP CONSTRAINT IF EXISTS leads_corporativos_estado_check;
+    `).catch(() => {/*ignorar si no existe*/});
+    
+    await pool.query(`
+      ALTER TABLE leads_corporativos 
+      ADD CONSTRAINT leads_corporativos_estado_check 
+      CHECK (estado IN ('pendiente', 'cotizado', 'confirmado', 'pagado', 'cancelado'))
+    `).catch(() => {/*ignorar si ya existe*/});
+    
+    console.log('✅ CHECK constraint actualizado para leads_corporativos');
+
   } catch (err) {
-    console.error('⚠️ Error verificando columna fecha_fin:', err.message);
+    console.error('⚠️ Error en migraciones de startup:', err.message);
   }
 
   // Cron: Recordatorios WhatsApp todos los días a las 10:00 AM (hora México)
