@@ -449,6 +449,27 @@ router.post('/completa', async (req, res) => {
   }
 });
 
+// DELETE /api/reservaciones/:id — Eliminar una reservación (admin)
+router.delete('/:id', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Verificar que la reservación existe
+    const result = await pool.query('SELECT id FROM reservaciones WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Reservación no encontrada' });
+    }
+
+    // Eliminar la reservación y sus datos relacionados (cascada está configurada en BD)
+    await pool.query('DELETE FROM reservaciones WHERE id = $1', [id]);
+
+    res.json({ message: 'Reservación eliminada exitosamente' });
+  } catch (err) {
+    console.error('Error eliminando reservación:', err.message);
+    res.status(500).json({ message: 'Error al eliminar la reservación' });
+  }
+});
+
 // POST /api/reservaciones/subir-ine — Subir foto de INE a Cloudinary
 router.post('/subir-ine', uploadINE.single('ine'), async (req, res) => {
   try {
