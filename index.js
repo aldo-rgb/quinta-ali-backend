@@ -61,8 +61,20 @@ app.get('/api/health', async (req, res) => {
 });
 
 // Levantar el servidor
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
+
+  // Ejecutar migración de fecha_fin al iniciar
+  try {
+    const pool = require('./db/connection');
+    await pool.query(`
+      ALTER TABLE reservaciones 
+      ADD COLUMN IF NOT EXISTS fecha_fin DATE
+    `);
+    console.log('✅ Columna fecha_fin verificada en reservaciones');
+  } catch (err) {
+    console.error('⚠️ Error verificando columna fecha_fin:', err.message);
+  }
 
   // Cron: Recordatorios WhatsApp todos los días a las 10:00 AM (hora México)
   cron.schedule('0 10 * * *', () => {
