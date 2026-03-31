@@ -162,22 +162,3 @@ router.get('/', async (req, res) => {
 });
 
 module.exports = router;
-        fecha: r.time,
-      }));
-
-    res.json({
-      total: reviews.length,
-      rating_promedio: data.result.rating,
-      reviews
-    });
-
-  } catch (error) {
-    console.error('Error en /api/google-reviews:', error.message);
-    res.status(500).json({
-      error: 'Error del servidor',
-      message: error.message
-    });
-  }
-});
-
-module.exports = router;
