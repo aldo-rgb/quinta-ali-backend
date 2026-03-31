@@ -119,9 +119,10 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // Procesar reviews
+    // Procesar reviews - filtrar nombres incompletos/cortos
     let reviews = (placeDetails.reviews || [])
       .filter(r => r.rating >= 4) // Solo reviews de 4+ estrellas
+      .filter(r => r.author_name && r.author_name.trim().length > 2) // Excluir nombres muy cortos
       .slice(0, 6) // Máximo 6 reviews
       .map(r => ({
         nombre: r.author_name,
