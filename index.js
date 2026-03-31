@@ -9,8 +9,21 @@ const app = express();
 const PORT = process.env.PORT || 3001; // 3001 para no chocar con Next.js en 3000
 
 // Middlewares
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://quinta-ali-frontend.vercel.app',
+  'https://laquintadeali.com',
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('No permitido por CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true
 };
