@@ -590,6 +590,45 @@ router.patch('/:id/precio', adminAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/reservaciones/:id/anticipo — Registrar pago anticipado (admin)
+router.patch('/:id/anticipo', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { monto_pagado } = req.body;
+
+    if (monto_pagado === undefined || monto_pagado === null) {
+      return res.status(400).json({ message: 'Se requiere monto_pagado' });
+    }
+
+    const montoPagado = Number(monto_pagado);
+    if (isNaN(montoPagado) || montoPagado < 0) {
+      return res.status(400).json({ message: 'monto_pagado debe ser un número válido >= 0' });
+    }
+
+    // Verificar que no exceda el monto total
+    const resCheck = await pool.query('SELECT monto_total FROM reservaciones WHERE id = $1', [id]);
+    if (resCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'Reservación no encontrada' });
+    }
+
+    const montoTotal = Number(resCheck.rows[0].monto_total);
+    if (montoPagado > montoTotal) {
+      return res.status(400).json({ message: `El monto pagado no puede exceder $${montoTotal}` });
+    }
+
+    const result = await pool.query(
+      `UPDATE reservaciones SET monto_pagado = $1, actualizado_en = NOW() WHERE id = $2 RETURNING *`,
+      [montoPagado, id]
+    );
+
+    console.log(`💰 Anticipo registrado para reservación ${id}: $${montoPagado}`);
+    res.json({ message: 'Anticipo registrado exitosamente', reservacion: result.rows[0] });
+  } catch (err) {
+    console.error('❌ Error registrando anticipo:', err.message);
+    res.status(500).json({ message: 'Error al registrar el anticipo' });
+  }
+});
+
 // POST /api/reservaciones/subir-ine — Subir foto de INE a Cloudinary
 router.post('/subir-ine', uploadINE.single('ine'), async (req, res) => {
   try {
