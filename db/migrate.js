@@ -127,6 +127,22 @@ async function migrate() {
     `);
     console.log('✅ Tabla clicks_promotor creada');
 
+    // Tabla de reglas de precio dinámico
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS reglas_precio_dinamico (
+        id              SERIAL PRIMARY KEY,
+        paquete_id      INT REFERENCES paquetes(id) ON DELETE CASCADE,
+        tipo            VARCHAR(20) CHECK (tipo IN ('fijo', 'porcentaje', 'descuento', 'aumento')),
+        valor           DECIMAL(10,2) NOT NULL,
+        fecha_inicio    DATE,
+        fecha_fin       DATE,
+        dias_semana     VARCHAR(100),
+        activo          BOOLEAN DEFAULT TRUE,
+        creado_en       TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla reglas_precio_dinamico creada');
+
     // Añadir soporte para rangos de fecha en paquetes de noche
     await client.query(`
       ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS fecha_fin DATE

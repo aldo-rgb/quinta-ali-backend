@@ -360,7 +360,15 @@ router.post('/completa', async (req, res) => {
 
     // Para paquetes de noche con rango: sumar precios de cada día
     let montoTotalDinamico;
-    const reglasRes = await client.query('SELECT * FROM reglas_precio_dinamico WHERE activo = TRUE');
+    let reglas = [];
+    try {
+      const reglasRes = await client.query('SELECT * FROM reglas_precio_dinamico WHERE activo = TRUE');
+      reglas = reglasRes.rows;
+    } catch (err) {
+      // Si la tabla no existe aún, usar precio simple
+      console.log('⚠️ Tabla reglas_precio_dinamico no existe, usando precio simple');
+      reglas = [];
+    }
     
     if (paquete.tipo_duracion === 'noche' && fecha_fin && fecha_fin !== fecha_evento) {
       // Rango de múltiples noches: sumar precio de cada día
@@ -371,8 +379,8 @@ router.post('/completa', async (req, res) => {
       
       while (fechaActual <= fin) {
         const dateStr = fechaActual.toISOString().split('T')[0];
-        if (reglasRes.rows.length > 0) {
-          const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), dateStr, reglasRes.rows);
+        if (reglas.length > 0) {
+          const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), dateStr, reglas);
           totalPrecio += calc.precioFinal;
         } else {
           totalPrecio += Number(paquete.precio);
@@ -383,8 +391,8 @@ router.post('/completa', async (req, res) => {
     } else {
       // Precio único (paquete de horas o una sola noche)
       const montoTotal = Number(paquete.precio) + montoExtras;
-      if (reglasRes.rows.length > 0) {
-        const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglasRes.rows);
+      if (reglas.length > 0) {
+        const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglas);
         montoTotalDinamico = calc.precioFinal + montoExtras;
       } else {
         montoTotalDinamico = montoTotal;
