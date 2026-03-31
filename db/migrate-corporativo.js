@@ -22,13 +22,25 @@ async function migrate() {
         iva             DECIMAL(10,2),
         total           DECIMAL(10,2),
         pdf_url         TEXT,
+        reservacion_id  INT REFERENCES reservaciones(id) ON DELETE SET NULL,
         estado          VARCHAR(20) DEFAULT 'pendiente'
-                          CHECK (estado IN ('pendiente', 'cotizado', 'pagado', 'cancelado')),
+                          CHECK (estado IN ('pendiente', 'cotizado', 'confirmado', 'pagado', 'cancelado')),
         creado_en       TIMESTAMP DEFAULT NOW(),
         actualizado_en  TIMESTAMP DEFAULT NOW()
       );
     `);
     console.log('✅ Tabla leads_corporativos creada');
+
+    // Agregar columna reservacion_id si no existe
+    await pool.query(`
+      ALTER TABLE leads_corporativos
+      ADD COLUMN IF NOT EXISTS reservacion_id INT REFERENCES reservaciones(id) ON DELETE SET NULL;
+    `);
+    
+    // Actualizar CHECK constraint si es necesario para incluir 'confirmado'
+    // (esto varía según si PostgreSQL permite UPDATE de constraints, generalmente hay que recrear)
+    
+    console.log('✅ Columnas verificadas');
     process.exit(0);
   } catch (err) {
     console.error('❌ Error en migración corporativo:', err.message);

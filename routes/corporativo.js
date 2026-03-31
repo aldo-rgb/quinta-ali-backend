@@ -18,8 +18,9 @@ const cotizacionLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// POST /api/corporativo/cotizar — Generar cotización corporativa con PDF
+// POST /api/corporativo/cotizar — Generar cotización + RESERVACIÓN corporativa con FACTURA
 router.post('/cotizar', cotizacionLimiter, async (req, res) => {
+  const client = await pool.connect();
   try {
     const {
       empresa,
@@ -30,26 +31,30 @@ router.post('/cotizar', cotizacionLimiter, async (req, res) => {
       rfc,
       razon_social,
       fecha_evento,
+      hora_inicio,
       paquete_base,
       num_asistentes,
       notas,
     } = req.body;
 
-    // Validación
-    if (!empresa || !contacto || !email) {
-      return res.status(400).json({ message: 'empresa, contacto y email son requeridos' });
+    // Validación: empresa, contacto, email Y fecha_evento son REQUERIDOS
+    if (!empresa || !contacto || !email || !fecha_evento) {
+      return res.status(400).json({ message: 'empresa, contacto, email y fecha_evento son requeridos' });
     }
 
     const asistentes = Number(num_asistentes) || 50;
+    const horaInicio = hora_inicio || '15:00';
 
     // Buscar precio del paquete base (si se eligió uno)
     let precioPaquete = 15000; // Precio corporativo default
     let nombrePaquete = 'Personalizado';
+    let paqueteId = null;
     if (paquete_base) {
-      const { rows } = await pool.query('SELECT nombre, precio FROM paquetes WHERE id = $1', [paquete_base]);
+      const { rows } = await pool.query('SELECT id, nombre, precio FROM paquetes WHERE id = $1', [paquete_base]);
       if (rows.length > 0) {
         precioPaquete = Number(rows[0].precio);
         nombrePaquete = rows[0].nombre;
+        paqueteId = rows[0].id;
       }
     }
 
@@ -57,21 +62,70 @@ router.post('/cotizar', cotizacionLimiter, async (req, res) => {
     const extraPorAsistente = 150;
     const subtotal = precioPaquete + (asistentes * extraPorAsistente);
     const iva = Math.round(subtotal * 0.16 * 100) / 100;
-    const total = Math.round((subtotal + iva) * 100) / 100;
+    const montoTotal = Math.round((subtotal + iva) * 100) / 100;
 
-    // Generar folio
-    const folio = `COT-${Date.now().toString(36).toUpperCase()}`;
+    // Generar folio (será número de factura)
+    const folio = `FAC-${Date.now().toString(36).toUpperCase()}`;
 
-    // Guardar en BD
-    const { rows: [lead] } = await pool.query(
-      `INSERT INTO leads_corporativos
-        (folio, empresa, contacto, email, telefono, num_empleados, rfc, razon_social, fecha_evento, paquete_base, num_asistentes, notas, subtotal, iva, total, estado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'cotizado')
-       RETURNING *`,
-      [folio, empresa, contacto, email, telefono || null, num_empleados || null, rfc || null, razon_social || null, fecha_evento || null, nombrePaquete, asistentes, notas || null, subtotal, iva, total]
+    await client.query('BEGIN');
+
+    // 1. Crear o encontrar cliente corporativo
+    const clienteRes = await client.query(
+      `SELECT id FROM clientes WHERE email = $1`,
+      [email]
+    );
+    
+    let clienteId;
+    if (clienteRes.rows.length > 0) {
+      clienteId = clienteRes.rows[0].id;
+      // Actualizar datos corporativos
+      await client.query(
+        `UPDATE clientes SET nombre = $1, apellido = $2, telefono = $3, actualizado_en = NOW() WHERE id = $4`,
+        [contacto, empresa, telefono || null, clienteId]
+      );
+    } else {
+      // Crear nuevo cliente corporativo
+      const nuevoClienteRes = await client.query(
+        `INSERT INTO clientes (nombre, apellido, email, telefono, es_invitado) 
+         VALUES ($1, $2, $3, $4, false) 
+         RETURNING id`,
+        [contacto, empresa, email, telefono || null]
+      );
+      clienteId = nuevoClienteRes.rows[0].id;
+    }
+
+    // 2. Crear reservación corporativa
+    let horaFin = '23:59'; // Default para corporativo (noche completa)
+    if (paqueteId) {
+      const paqRes = await client.query('SELECT tipo_duracion, duracion_horas FROM paquetes WHERE id = $1', [paqueteId]);
+      if (paqRes.rows.length > 0 && paqRes.rows[0].tipo_duracion === 'horas') {
+        const duracion = paqRes.rows[0].duracion_horas || 4;
+        const [h, m] = horaInicio.split(':').map(Number);
+        const finH = h + duracion;
+        horaFin = `${String(Math.min(finH, 23)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      }
+    }
+
+    const reservacionRes = await client.query(
+      `INSERT INTO reservaciones 
+        (cliente_id, paquete_id, fecha_evento, hora_inicio, hora_fin, num_invitados, monto_total, notas)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [clienteId, paqueteId || 1, fecha_evento, horaInicio, horaFin, asistentes, montoTotal, notas || `Reservación B2B: ${empresa}`]
     );
 
-    // Generar PDF
+    const reservacionId = reservacionRes.rows[0].id;
+
+    // 3. Guardar en leads_corporativos (para historial)
+    await client.query(
+      `INSERT INTO leads_corporativos
+        (folio, empresa, contacto, email, telefono, num_empleados, rfc, razon_social, fecha_evento, paquete_base, num_asistentes, notas, subtotal, iva, total, estado, reservacion_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'confirmado', $16)
+       RETURNING id`,
+      [folio, empresa, contacto, email, telefono || null, num_empleados || null, rfc || null, razon_social || null, fecha_evento, nombrePaquete, asistentes, notas || null, subtotal, iva, montoTotal, reservacionId]
+    );
+
+    // 4. Generar PDF FACTURA (no cotización)
     const pdfPath = await generarPDFCotizacion({
       folio,
       empresa,
@@ -81,54 +135,74 @@ router.post('/cotizar', cotizacionLimiter, async (req, res) => {
       numAsistentes: asistentes,
       subtotal,
       iva,
-      total,
+      total: montoTotal,
       notas,
+      esFactura: true, // Marcar como factura
+      rfc,
+      razonSocial,
     });
 
-    // Guardar referencia al PDF
-    await pool.query('UPDATE leads_corporativos SET pdf_url = $1 WHERE id = $2', [pdfPath, lead.id]);
+    // 5. Actualizar lead con URL del PDF
+    await client.query(
+      'UPDATE leads_corporativos SET pdf_url = $1 WHERE folio = $2',
+      [pdfPath, folio]
+    );
 
-    // Enviar correo con PDF adjunto
+    // 6. Enviar factura a cliente
     const emailResult = await enviarCotizacion({
       to: email,
       contacto,
       empresa,
       folio,
       pdfPath,
+      esFactura: true,
+      total: montoTotal,
+      fecha_evento,
     });
 
-    // Notificar al admin por WhatsApp
+    // 7. Notificar al admin por WhatsApp
     const adminPhone = process.env.ADMIN_WHATSAPP;
     if (adminPhone) {
       try {
         await enviarMensaje(
           adminPhone,
-          `🏢 *Nuevo lead corporativo*\n\n` +
-          `Empresa: ${empresa}\n` +
-          `Contacto: ${contacto}\n` +
-          `Email: ${email}\n` +
-          `Asistentes: ${asistentes}\n` +
-          `Total: $${total.toLocaleString('es-MX')} MXN\n` +
-          `Folio: ${folio}`
+          `✅ *FACTURA CORPORATIVA GENERADA*\n\n` +
+          `📄 Folio: ${folio}\n` +
+          `🏢 Empresa: ${empresa}\n` +
+          `👤 Contacto: ${contacto}\n` +
+          `📅 Fecha evento: ${fecha_evento}\n` +
+          `👥 Asistentes: ${asistentes}\n` +
+          `💰 Total: $${montoTotal.toLocaleString('es-MX')} MXN\n` +
+          `📌 Reservación #${reservacionId}`
         );
       } catch (e) {
-        // WhatsApp notif falló (no crítico)
+        console.log('⚠️ WhatsApp notif falló (no crítico)');
       }
     }
 
-    res.json({
+    await client.query('COMMIT');
+
+    console.log(`✅ Factura corporativa creada: ${folio} | Reservación: #${reservacionId}`);
+
+    res.status(201).json({
       ok: true,
       folio,
-      total,
+      reservacion_id: reservacionId,
+      cliente_id: clienteId,
+      total: montoTotal,
       subtotal,
       iva,
       emailEnviado: emailResult.sent,
       pdfGenerado: true,
+      mensaje: 'Factura generada y reservación creada exitosamente',
     });
 
   } catch (err) {
-    console.error('Error cotización corporativa:', err);
-    res.status(500).json({ message: 'Error al generar la cotización' });
+    await client.query('ROLLBACK');
+    console.error('❌ Error cotización corporativa:', err.message);
+    res.status(500).json({ message: err.message || 'Error al generar la factura corporativa' });
+  } finally {
+    client.release();
   }
 });
 
