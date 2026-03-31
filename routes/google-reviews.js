@@ -1,69 +1,18 @@
 const express = require('express');
 const router = express.Router();
+const { translate } = require('google-translate-api-x');
 
 /**
- * Traduce un texto usando MyMemory API a español latino
+ * Traduce un texto al español latino usando Google Translate
  */
-async function traducirAlEspanolLatino(texto) {
+async function traducirAlEspanol(texto) {
   try {
-    // Dice principales en español latino para mantener naturalidad
-    const terminosLatinoamericanos = {
-      // Inglés común -> Español latino
-      'parking': 'estacionamiento',
-      'pool': 'piscina',
-      'beautiful': 'hermoso',
-      'amazing': 'increíble',
-      'wonderful': 'maravilloso',
-      'great': 'genial',
-      'staff': 'personal',
-      'service': 'servicio',
-      'attention': 'atención',
-      'friendly': 'amable',
-      'clean': 'limpio',
-      'fun': 'divertido',
-      'perfect': 'perfecto',
-      'excellent': 'excelente',
-      'good': 'bueno',
-      'nice': 'agradable',
-      'very': 'muy',
-      'place': 'lugar',
-      'event': 'evento',
-      'party': 'fiesta',
-      'celebration': 'celebración',
-      'family': 'familia',
-      'kids': 'niños',
-      'children': 'hijos'
-    };
-
-    const response = await fetch(
-      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texto)}&langpair=en|es`
-    );
-    const data = await response.json();
-    if (data.responseStatus === 200 && data.responseData.translatedText) {
-      let traducido = data.responseData.translatedText;
-      
-      // Aplicar correcciones para términos latinoamericanos
-      const lowerCaseTexto = texto.toLowerCase();
-      for (const [ingles, latino] of Object.entries(terminosLatinoamericanos)) {
-        if (lowerCaseTexto.includes(ingles)) {
-          // Encontrar todas las instancias con la mayúscula correcta
-          const regex = new RegExp('\\b' + ingles + '\\b', 'gi');
-          traducido = traducido.replace(regex, (match) => {
-            // Mantener la mayúscula del original si aplica
-            if (match[0] === match[0].toUpperCase()) {
-              return latino.charAt(0).toUpperCase() + latino.slice(1);
-            }
-            return latino;
-          });
-        }
-      }
-      
-      return traducido;
-    }
+    const res = await translate(texto, { to: 'es' });
+    return res.text;
   } catch (err) {
-    console.error('Error translating text to Latin American Spanish:', err.message);
+    console.error('Error translating review:', err.message);
+    return texto; // Retornar original si falla
   }
-  return texto; // Retornar original si falla la traducción
 }
 
 /**
@@ -175,9 +124,24 @@ router.get('/', async (req, res) => {
         nombre: r.author_name,
         rating: r.rating,
         texto_en: r.text, // Texto original en inglés
+        texto_es: r.text, // Se reemplazará con traducción
         foto: r.profile_photo_url,
         fecha: r.time
       }));
+
+    // Traducir reviews al español en paralelo
+    reviews = await Promise.all(
+      reviews.map(async (review) => {
+        try {
+          const traducido = await traducirAlEspanol(review.texto_en);
+          return { ...review, texto_es: traducido, texto: traducido };
+        } catch (err) {
+          // Si falla, devolver original en inglés
+          console.error('Failed to translate review:', err.message);
+          return review;
+        }
+      })
+    );
 
     res.json({
       total: reviews.length,
