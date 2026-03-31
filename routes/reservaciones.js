@@ -301,7 +301,10 @@ router.post('/completa', async (req, res) => {
   try {
     const { nombre, apellido, telefono, email, google_id, es_invitado, paquete_id, fecha_evento, fecha_fin, hora_inicio, num_invitados, notas, extras, ine_url, promotor } = req.body;
 
+    console.log('📝 POST /completa recibido:', { nombre, paquete_id, fecha_evento, hora_inicio });
+
     if (!nombre || !email || !paquete_id || !fecha_evento || !hora_inicio) {
+      console.log('❌ Faltan campos:', { nombre: !!nombre, email: !!email, paquete_id: !!paquete_id, fecha_evento: !!fecha_evento, hora_inicio: !!hora_inicio });
       return res.status(400).json({ message: 'Faltan campos obligatorios' });
     }
 
@@ -379,9 +382,14 @@ router.post('/completa', async (req, res) => {
       
       while (fechaActual <= fin) {
         const dateStr = fechaActual.toISOString().split('T')[0];
-        if (reglas.length > 0) {
-          const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), dateStr, reglas);
-          totalPrecio += calc.precioFinal;
+        if (reglas.length > 0 && preciosRouter && preciosRouter.calcularPrecioFinal) {
+          try {
+            const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), dateStr, reglas);
+            totalPrecio += calc.precioFinal || Number(paquete.precio);
+          } catch (calcErr) {
+            console.log('⚠️ Error calculando precio dinámico, usando precio base:', calcErr.message);
+            totalPrecio += Number(paquete.precio);
+          }
         } else {
           totalPrecio += Number(paquete.precio);
         }
@@ -391,9 +399,14 @@ router.post('/completa', async (req, res) => {
     } else {
       // Precio único (paquete de horas o una sola noche)
       const montoTotal = Number(paquete.precio) + montoExtras;
-      if (reglas.length > 0) {
-        const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglas);
-        montoTotalDinamico = calc.precioFinal + montoExtras;
+      if (reglas.length > 0 && preciosRouter && preciosRouter.calcularPrecioFinal) {
+        try {
+          const calc = preciosRouter.calcularPrecioFinal(Number(paquete.precio), fecha_evento, reglas);
+          montoTotalDinamico = (calc.precioFinal || Number(paquete.precio)) + montoExtras;
+        } catch (calcErr) {
+          console.log('⚠️ Error calculando precio dinámico, usando precio base:', calcErr.message);
+          montoTotalDinamico = montoTotal;
+        }
       } else {
         montoTotalDinamico = montoTotal;
       }
@@ -447,11 +460,19 @@ router.post('/completa', async (req, res) => {
     await client.query('ROLLBACK');
 
     if (err.message && err.message.includes('CONFLICTO DE HORARIO')) {
+      console.log('⚠️ Conflicto de horario:', err.message);
       return res.status(409).json({ message: 'Ese horario ya está ocupado. Por favor elige otra fecha u hora.' });
     }
 
-    console.error('Error en reservación completa:', err.message);
-    res.status(500).json({ message: 'Error del servidor' });
+    console.error('❌ Error en reservación completa:');
+    console.error('   Mensaje:', err.message);
+    console.error('   Stack:', err.stack);
+    console.error('   Código SQL:', err.code);
+    
+    res.status(500).json({ 
+      message: err.message || 'Error del servidor',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   } finally {
     client.release();
   }
