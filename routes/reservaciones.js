@@ -451,22 +451,57 @@ router.post('/completa', async (req, res) => {
 
 // DELETE /api/reservaciones/:id — Eliminar una reservación (admin)
 router.delete('/:id', adminAuth, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
     
     // Verificar que la reservación existe
-    const result = await pool.query('SELECT id FROM reservaciones WHERE id = $1', [id]);
+    const result = await client.query('SELECT id, cliente_id FROM reservaciones WHERE id = $1', [id]);
     if (result.rows.length === 0) {
+      client.release();
       return res.status(404).json({ message: 'Reservación no encontrada' });
     }
 
-    // Eliminar la reservación y sus datos relacionados (cascada está configurada en BD)
-    await pool.query('DELETE FROM reservaciones WHERE id = $1', [id]);
+    const cliente_id = result.rows[0].cliente_id;
 
+    await client.query('BEGIN');
+
+    // 1. Eliminar extras de la reservación
+    await client.query('DELETE FROM reservacion_extras WHERE reservacion_id = $1', [id]);
+
+    // 2. Eliminar firmas de la reservación
+    await client.query('DELETE FROM firmas_reglamento WHERE reservacion_id = $1', [id]);
+
+    // 3. Eliminar reseñas de la reservación
+    await client.query('DELETE FROM resenas WHERE reservacion_id = $1', [id]);
+
+    // 4. Eliminar la reservación
+    await client.query('DELETE FROM reservaciones WHERE id = $1', [id]);
+
+    // 5. Opcional: Eliminar cliente si no tiene más reservaciones
+    const clienteUsos = await client.query(
+      'SELECT COUNT(*) FROM reservaciones WHERE cliente_id = $1',
+      [cliente_id]
+    );
+    if (parseInt(clienteUsos.rows[0].count) === 0) {
+      // Solo eliminar cliente si es invitado y no tiene más reservaciones
+      const clienteInfo = await client.query(
+        'SELECT es_invitado FROM clientes WHERE id = $1',
+        [cliente_id]
+      );
+      if (clienteInfo.rows[0]?.es_invitado) {
+        await client.query('DELETE FROM clientes WHERE id = $1', [cliente_id]);
+      }
+    }
+
+    await client.query('COMMIT');
     res.json({ message: 'Reservación eliminada exitosamente' });
   } catch (err) {
-    console.error('Error eliminando reservación:', err.message);
-    res.status(500).json({ message: 'Error al eliminar la reservación' });
+    await client.query('ROLLBACK');
+    console.error('❌ Error eliminando reservación:', err.message, err.stack);
+    res.status(500).json({ message: err.message || 'Error al eliminar la reservación' });
+  } finally {
+    client.release();
   }
 });
 
