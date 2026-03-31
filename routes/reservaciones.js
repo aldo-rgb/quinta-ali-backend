@@ -558,6 +558,38 @@ router.delete('/:id', adminAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/reservaciones/:id/precio — Actualizar monto total (admin)
+router.patch('/:id/precio', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { monto_total } = req.body;
+
+    if (monto_total === undefined || monto_total === null) {
+      return res.status(400).json({ message: 'Se requiere monto_total' });
+    }
+
+    const nuevoMonto = Number(monto_total);
+    if (isNaN(nuevoMonto) || nuevoMonto < 0) {
+      return res.status(400).json({ message: 'monto_total debe ser un número válido >= 0' });
+    }
+
+    const result = await pool.query(
+      `UPDATE reservaciones SET monto_total = $1, actualizado_en = NOW() WHERE id = $2 RETURNING *`,
+      [nuevoMonto, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Reservación no encontrada' });
+    }
+
+    console.log(`✏️ Precio actualizado para reservación ${id}: $${nuevoMonto}`);
+    res.json({ message: 'Precio actualizado exitosamente', reservacion: result.rows[0] });
+  } catch (err) {
+    console.error('❌ Error actualizando precio:', err.message);
+    res.status(500).json({ message: 'Error al actualizar el precio' });
+  }
+});
+
 // POST /api/reservaciones/subir-ine — Subir foto de INE a Cloudinary
 router.post('/subir-ine', uploadINE.single('ine'), async (req, res) => {
   try {
