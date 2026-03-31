@@ -139,7 +139,7 @@ router.post('/cotizar', cotizacionLimiter, async (req, res) => {
       notas,
       esFactura: true, // Marcar como factura
       rfc,
-      razonSocial,
+      razonSocial: razon_social,
     });
 
     // 5. Actualizar lead con URL del PDF
