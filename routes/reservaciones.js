@@ -158,7 +158,8 @@ router.get('/calendario', async (req, res) => {
     for (const [fecha, info] of Object.entries(porDia)) {
       calendario[fecha] = {
         reservaciones: info.reservaciones,
-        disponible: !info.tiene_noche && info.reservaciones < 3,
+        // Un día está disponible SOLO si NO tiene ninguna reservación
+        disponible: info.reservaciones === 0 && !info.tiene_noche,
       };
     }
 
