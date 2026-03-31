@@ -1,18 +1,31 @@
 const express = require('express');
 const router = express.Router();
-const { translate } = require('google-translate-api-x');
 
 /**
- * Traduce un texto al español latino usando Google Translate
+ * Traduce un texto al español usando LibreTranslate API (gratuita, sin API key)
  */
 async function traducirAlEspanol(texto) {
   try {
-    const res = await translate(texto, { to: 'es' });
-    return res.text;
+    const response = await fetch('https://translate.terraprint.com/translate', {
+      method: 'POST',
+      body: JSON.stringify({
+        q: texto,
+        source: 'en',
+        target: 'es'
+      }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) throw new Error(`API error: ${response.status}`);
+    
+    const data = await response.json();
+    if (data.translatedText) {
+      return data.translatedText;
+    }
   } catch (err) {
     console.error('Error translating review:', err.message);
-    return texto; // Retornar original si falla
   }
+  return texto; // Retornar original si falla
 }
 
 /**
