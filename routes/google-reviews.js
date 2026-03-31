@@ -174,7 +174,8 @@ router.get('/', async (req, res) => {
       .map(r => ({
         nombre: r.author_name,
         rating: r.rating,
-        texto: r.text,
+        texto_en: r.text, // Guardar texto original en inglés
+        texto: r.text, // Por defecto mostrar el original
         foto: r.profile_photo_url,
         fecha: r.time
       }));
@@ -184,10 +185,10 @@ router.get('/', async (req, res) => {
       reviews.map(async (review) => {
         try {
           const traducido = await Promise.race([
-            traducirAlEspanolLatino(review.texto),
+            traducirAlEspanolLatino(review.texto_en),
             new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
           ]);
-          return { ...review, texto: traducido };
+          return { ...review, texto: traducido, texto_es: traducido };
         } catch (err) {
           // Si falla o timeout, devolver el original
           return review;
