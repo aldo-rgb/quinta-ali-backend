@@ -37,9 +37,9 @@ router.post('/cotizar', cotizacionLimiter, async (req, res) => {
       notas,
     } = req.body;
 
-    // Validación: empresa, contacto, email Y fecha_evento son REQUERIDOS
-    if (!empresa || !contacto || !email || !fecha_evento) {
-      return res.status(400).json({ message: 'empresa, contacto, email y fecha_evento son requeridos' });
+    // Validación: empresa, contacto, email, fecha_evento Y paquete_base son REQUERIDOS
+    if (!empresa || !contacto || !email || !fecha_evento || !paquete_base) {
+      return res.status(400).json({ message: 'empresa, contacto, email, fecha_evento y paquete_base son requeridos' });
     }
 
     const asistentes = Number(num_asistentes) || 50;
