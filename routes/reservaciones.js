@@ -432,7 +432,7 @@ router.post('/completa', async (req, res) => {
       reservacion: rows[0],
       cliente_id: clienteId,
       paquete: paquete.nombre,
-      monto_total: montoTotal,
+      monto_total: montoTotalDinamico,
       monto_extras: montoExtras,
     });
   } catch (err) {
