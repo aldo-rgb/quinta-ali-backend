@@ -194,6 +194,7 @@ router.post('/cotizar', cotizacionLimiter, async (req, res) => {
       iva,
       emailEnviado: emailResult.sent,
       pdfGenerado: true,
+      pdfUrl: `/api/corporativo/pdf/${folio}`,
       mensaje: 'Factura generada y reservación creada exitosamente',
     });
 
@@ -240,12 +241,12 @@ router.patch('/leads/:id', adminAuth, async (req, res) => {
   }
 });
 
-// GET /api/corporativo/pdf/:folio — Descargar PDF de cotización
+// GET /api/corporativo/pdf/:folio — Descargar PDF de cotización o factura
 router.get('/pdf/:folio', async (req, res) => {
   try {
     const { folio } = req.params;
-    // Validar formato de folio
-    if (!/^COT-[A-Z0-9]+$/i.test(folio)) {
+    // Validar formato de folio (COT- o FAC-)
+    if (!/^(COT|FAC)-[A-Z0-9]+$/i.test(folio)) {
       return res.status(400).json({ message: 'Folio inválido' });
     }
     const { rows } = await pool.query(
