@@ -6,8 +6,12 @@ const router = express.Router();
  */
 async function traducirAlEspanol(texto) {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 segundo timeout
+
     const response = await fetch('https://translate.terraprint.com/translate', {
       method: 'POST',
+      signal: controller.signal,
       body: JSON.stringify({
         q: texto,
         source: 'en',
@@ -16,16 +20,18 @@ async function traducirAlEspanol(texto) {
       headers: { 'Content-Type': 'application/json' }
     });
     
+    clearTimeout(timeoutId);
+    
     if (!response.ok) throw new Error(`API error: ${response.status}`);
     
     const data = await response.json();
-    if (data.translatedText) {
+    if (data.translatedText && data.translatedText.trim() !== "") {
       return data.translatedText;
     }
   } catch (err) {
     console.error('Error translating review:', err.message);
   }
-  return texto; // Retornar original si falla
+  return null; // Retornar null si falla o timeout
 }
 
 /**
@@ -147,11 +153,15 @@ router.get('/', async (req, res) => {
       reviews.map(async (review) => {
         try {
           const traducido = await traducirAlEspanol(review.texto_en);
-          return { ...review, texto_es: traducido, texto: traducido };
+          // Si la traducción no es null y es diferente del original, usarla
+          if (traducido && traducido !== review.texto_en) {
+            return { ...review, texto_es: traducido };
+          }
+          // Si falla o es igual al original, dejar texto_es como null para que frontend sepa que no hay traducción
+          return { ...review, texto_es: null };
         } catch (err) {
-          // Si falla, devolver original en inglés
           console.error('Failed to translate review:', err.message);
-          return review;
+          return { ...review, texto_es: null };
         }
       })
     );
