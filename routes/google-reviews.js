@@ -2,36 +2,75 @@ const express = require('express');
 const router = express.Router();
 
 /**
- * Traduce un texto al español usando LibreTranslate API (gratuita, sin API key)
+ * Traduce un texto al español usando MyMemory API (gratuita, sin API key)
+ * Fallback: Google Translate API si está disponible
  */
 async function traducirAlEspanol(texto) {
+  // Opción 1: Intentar con Google Cloud Translation (si existe API key)
+  if (process.env.GOOGLE_CLOUD_TRANSLATE_API_KEY) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch('https://translation.googleapis.com/language/translate/v2', {
+        method: 'POST',
+        signal: controller.signal,
+        body: JSON.stringify({
+          q: texto,
+          target: 'es'
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': process.env.GOOGLE_CLOUD_TRANSLATE_API_KEY
+        }
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data && data.data.translations && data.data.translations[0]) {
+          const translated = data.data.translations[0].translatedText;
+          if (translated && translated.trim() !== "") {
+            console.log('✓ Traducción con Google Cloud Translation');
+            return translated;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error with Google Cloud Translation:', err.message);
+    }
+  }
+
+  // Opción 2: Usar MyMemory (sin API key)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 segundo timeout
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const response = await fetch('https://translate.terraprint.com/translate', {
-      method: 'POST',
-      signal: controller.signal,
-      body: JSON.stringify({
-        q: texto,
-        source: 'en',
-        target: 'es'
-      }),
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
+    const response = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texto)}&langpair=en|es`,
+      {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }
+    );
+
     clearTimeout(timeoutId);
-    
-    if (!response.ok) throw new Error(`API error: ${response.status}`);
-    
-    const data = await response.json();
-    if (data.translatedText && data.translatedText.trim() !== "") {
-      return data.translatedText;
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.responseData && data.responseData.translatedText && data.responseData.translatedText.trim() !== "") {
+        console.log('✓ Traducción con MyMemory');
+        return data.responseData.translatedText;
+      }
     }
   } catch (err) {
-    console.error('Error translating review:', err.message);
+    console.error('Error with MyMemory Translation:', err.message);
   }
-  return null; // Retornar null si falla o timeout
+
+  // Si no funciona nada, retornar null para que frontend sepa que no hay traducción
+  console.warn('⚠️ No se pudo traducir review:', texto.substring(0, 50));
+  return null;
 }
 
 /**
