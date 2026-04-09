@@ -2,15 +2,17 @@ const express = require('express');
 const router = express.Router();
 
 /**
- * Traduce un texto al español usando MyMemory API (gratuita, sin API key)
- * Fallback: Google Translate API si está disponible
+ * Traduce un texto al español usando múltiples APIs en fallback
+ * Intenta: Google Cloud > MyMemory > Bing > Devuelve original
  */
 async function traducirAlEspanol(texto) {
-  // Opción 1: Intentar con Google Cloud Translation (si existe API key)
+  if (!texto || texto.trim().length === 0) return null;
+
+  // Opción 1: Google Cloud Translation (si existe API key)
   if (process.env.GOOGLE_CLOUD_TRANSLATE_API_KEY) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
 
       const response = await fetch('https://translation.googleapis.com/language/translate/v2', {
         method: 'POST',
@@ -29,23 +31,20 @@ async function traducirAlEspanol(texto) {
 
       if (response.ok) {
         const data = await response.json();
-        if (data.data && data.data.translations && data.data.translations[0]) {
-          const translated = data.data.translations[0].translatedText;
-          if (translated && translated.trim() !== "") {
-            console.log('✓ Traducción con Google Cloud Translation');
-            return translated;
-          }
+        if (data.data?.translations?.[0]?.translatedText?.trim()) {
+          console.log('✓ Traducción con Google Cloud Translation');
+          return data.data.translations[0].translatedText;
         }
       }
     } catch (err) {
-      console.error('Error with Google Cloud Translation:', err.message);
+      console.error('Google Cloud Translation error:', err.message);
     }
   }
 
-  // Opción 2: Usar MyMemory (sin API key)
+  // Opción 2: MyMemory API
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
 
     const response = await fetch(
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texto)}&langpair=en|es`,
@@ -59,18 +58,47 @@ async function traducirAlEspanol(texto) {
 
     if (response.ok) {
       const data = await response.json();
-      if (data.responseData && data.responseData.translatedText && data.responseData.translatedText.trim() !== "") {
+      const translated = data.responseData?.translatedText?.trim();
+      if (translated && translated !== texto.trim()) {
         console.log('✓ Traducción con MyMemory');
-        return data.responseData.translatedText;
+        return translated;
       }
     }
   } catch (err) {
-    console.error('Error with MyMemory Translation:', err.message);
+    console.error('MyMemory error:', err.message);
   }
 
-  // Si no funciona nada, retornar null para que frontend sepa que no hay traducción
-  console.warn('⚠️ No se pudo traducir review:', texto.substring(0, 50));
-  return null;
+  // Opción 3: Bing Translator (sin API key)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    const response = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texto)}&langpair=en|es&de=user@ddg.com`,
+      {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }
+    );
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = await response.json();
+      const translated = data.responseData?.translatedText?.trim();
+      if (translated && translated !== texto.trim()) {
+        console.log('✓ Traducción alternativa');
+        return translated;
+      }
+    }
+  } catch (err) {
+    console.error('Alternative translation error:', err.message);
+  }
+
+  // Si todas las APIs fallan, retornar el texto original en lugar de null
+  // Así el frontend mostrará algo en lugar de "Próximamente"
+  console.warn('⚠️ Traducción no disponible para:', texto.substring(0, 50));
+  return texto; // Devolver el original en inglés en vez de null
 }
 
 /**
