@@ -103,6 +103,24 @@ CREATE TABLE IF NOT EXISTS galeria_fotos (
 CREATE INDEX idx_galeria_area ON galeria_fotos (area) WHERE activo = TRUE;
 
 -- =====================================================
+-- TABLA: Google Reviews (Cache + Traducciones manuales)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS google_reviews_cache (
+    id              SERIAL PRIMARY KEY,
+    autor_nombre    VARCHAR(150) NOT NULL,
+    rating          INT CHECK (rating >= 1 AND rating <= 5),
+    texto_en        TEXT NOT NULL,
+    texto_es        TEXT,                        -- Traducción automática o manual
+    texto_es_manual TEXT,                        -- Traducción editada por admin
+    url_foto        TEXT,
+    fuente          VARCHAR(50) DEFAULT 'google', -- 'google', 'trustpilot', etc
+    externo_id      VARCHAR(255) UNIQUE,        -- ID externo para no duplicar
+    activo          BOOLEAN DEFAULT TRUE,
+    creado_en       TIMESTAMP DEFAULT NOW(),
+    actualizado_en  TIMESTAMP DEFAULT NOW()
+);
+
+-- =====================================================
 -- DATOS INICIALES: Paquetes de ejemplo
 -- =====================================================
 INSERT INTO paquetes (nombre, descripcion, tipo_duracion, duracion_horas, precio, capacidad_max) VALUES
