@@ -58,9 +58,8 @@ router.post('/cotizar', cotizacionLimiter, async (req, res) => {
       }
     }
 
-    // Cálculo corporativo: precio base + extra por asistente
-    const extraPorAsistente = 150;
-    const subtotal = precioPaquete + (asistentes * extraPorAsistente);
+    // Cálculo corporativo: solo precio del paquete (incluye hasta 100 asistentes)
+    const subtotal = precioPaquete;
     const iva = Math.round(subtotal * 0.16 * 100) / 100;
     const montoTotal = Math.round((subtotal + iva) * 100) / 100;
 
