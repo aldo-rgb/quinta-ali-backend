@@ -42,7 +42,7 @@ router.get('/', adminAuth, async (req, res) => {
       JOIN clientes c ON r.cliente_id = c.id
       JOIN paquetes p ON r.paquete_id = p.id
       WHERE 1=1 ${archivadasCondition}
-      ORDER BY r.fecha_evento DESC, r.hora_inicio DESC
+      ORDER BY r.fecha_evento ASC, r.hora_inicio ASC
     `);
     res.json(rows);
   } catch (err) {
