@@ -141,7 +141,9 @@ router.get('/calendario', async (req, res) => {
       `SELECT fecha_evento, fecha_fin, hora_inicio, hora_fin, paquete_id, p.tipo_duracion
        FROM reservaciones r
        JOIN paquetes p ON r.paquete_id = p.id
-       WHERE fecha_evento BETWEEN $1 AND $2 AND r.estado NOT IN ('cancelada')
+       WHERE r.estado NOT IN ('cancelada')
+         AND fecha_evento <= $2
+         AND COALESCE(fecha_fin, fecha_evento) >= $1
        ORDER BY fecha_evento, hora_inicio`,
       [inicioMes, finMes]
     );
