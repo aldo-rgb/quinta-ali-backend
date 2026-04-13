@@ -67,21 +67,38 @@ CREATE INDEX idx_reservaciones_disponibilidad ON reservaciones (fecha_evento, ho
 -- FUNCIÓN: Verificar que no haya empalme de horarios
 -- Se ejecuta ANTES de cada INSERT o UPDATE en reservaciones
 -- =====================================================
+-- =====================================================
+-- FUNCIÓN: Verificar que no haya empalme de horarios
+-- Se ejecuta ANTES de cada INSERT o UPDATE en reservaciones
+-- Ahora verifica rangos de fechas completos (fecha_evento a fecha_fin)
+-- =====================================================
 CREATE OR REPLACE FUNCTION verificar_disponibilidad()
 RETURNS TRIGGER AS $$
+DECLARE
+    fecha_fin_nueva DATE;
 BEGIN
+    -- Definir rango de fecha de la nueva reservación
+    fecha_fin_nueva := COALESCE(NEW.fecha_fin, NEW.fecha_evento);
+    
+    -- Verificar solapamiento de rangos de fechas
     IF EXISTS (
         SELECT 1 FROM reservaciones
-        WHERE fecha_evento = NEW.fecha_evento
-          AND id != COALESCE(NEW.id, 0)
+        WHERE id != COALESCE(NEW.id, 0)
           AND estado NOT IN ('cancelada')
-          AND (NEW.hora_inicio, NEW.hora_fin) OVERLAPS (hora_inicio, hora_fin)
+          AND fecha_evento <= fecha_fin_nueva
+          AND COALESCE(fecha_fin, fecha_evento) >= NEW.fecha_evento
+          AND (
+              fecha_evento != NEW.fecha_evento
+              OR (NEW.hora_inicio, NEW.hora_fin) OVERLAPS (hora_inicio, hora_fin)
+          )
     ) THEN
-        RAISE EXCEPTION 'CONFLICTO DE HORARIO: Ya existe una reservación en ese horario para la fecha %', NEW.fecha_evento;
+        RAISE EXCEPTION 'CONFLICTO: El rango %-% conflictúa con una reservación existente',
+            NEW.fecha_evento, fecha_fin_nueva;
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
 
 -- TRIGGER: Se activa automáticamente antes de insertar o actualizar
 CREATE TRIGGER trg_verificar_disponibilidad
