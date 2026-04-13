@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
 const adminAuth = require('./middleware/adminAuth');
-const { enviarRecordatorios } = require('./services/recordatorios');
+const { enviarRecordatorios, enviarRecordatoriosStaff } = require('./services/recordatorios');
 
 const app = express();
 const PORT = process.env.PORT || 3001; // 3001 para no chocar con Next.js en 3000
@@ -102,12 +102,19 @@ app.listen(PORT, async () => {
     console.error('⚠️ Error en migraciones de startup:', err.message);
   }
 
-  // Cron: Recordatorios WhatsApp todos los días a las 10:00 AM (hora México)
+  // Cron: Recordatorios WhatsApp a STAFF 3 días antes (9:00 AM)
+  cron.schedule('0 9 * * *', () => {
+    console.log('⏰ Ejecutando cron de recordatorios a STAFF (3 días antes)...');
+    enviarRecordatoriosStaff();
+  }, { timezone: 'America/Monterrey' });
+  console.log('👔 Cron de recordatorios a STAFF activo (diario 09:00 AM, 3 días antes)');
+
+  // Cron: Recordatorios WhatsApp a CLIENTES todos los días a las 10:00 AM (hora México)
   cron.schedule('0 10 * * *', () => {
-    console.log('⏰ Ejecutando cron de recordatorios...');
+    console.log('⏰ Ejecutando cron de recordatorios a CLIENTES...');
     enviarRecordatorios();
   }, { timezone: 'America/Monterrey' });
-  console.log('📬 Cron de recordatorios WhatsApp activo (diario 10:00 AM)');
+  console.log('📬 Cron de recordatorios a CLIENTES activo (diario 10:00 AM, 24h antes)');
 
   // Cron: Solicitudes de reseña todos los días a las 12:00 PM (hora México)
   cron.schedule('0 12 * * *', async () => {
