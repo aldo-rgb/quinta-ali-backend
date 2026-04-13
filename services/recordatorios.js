@@ -53,12 +53,15 @@ async function enviarRecordatorios() {
  */
 async function enviarRecordatoriosStaff() {
   try {
-    const staffTelefono = process.env.STAFF_ENCARGADOS;
+    const staffTelefonos = process.env.STAFF_ENCARGADOS;
     
-    if (!staffTelefono) {
+    if (!staffTelefonos) {
       console.warn('⚠️  STAFF_ENCARGADOS no configurado. Recordatorios de staff desactivados.');
       return;
     }
+
+    // Soportar múltiples números separados por coma
+    const telefonosArray = staffTelefonos.split(',').map(t => t.trim()).filter(t => t.length > 0);
 
     // Buscar reservaciones para dentro de 3 días que estén confirmadas o pagadas
     const { rows } = await pool.query(`
@@ -107,8 +110,16 @@ async function enviarRecordatoriosStaff() {
     mensajeResumen += `\n¡Prepárense para los eventos! 💪\n`;
     mensajeResumen += `Confirmen disponibilidad y equipamiento necesario.`;
 
-    await enviarMensaje(staffTelefono, mensajeResumen);
-    console.log(`  ✅ Recordatorio enviado a encargados sobre ${rows.length} evento(s)`);
+    // Enviar a cada número de staff
+    for (const telefono of telefonosArray) {
+      try {
+        await enviarMensaje(telefono, mensajeResumen);
+        console.log(`  ✅ Recordatorio enviado a ${telefono}`);
+      } catch (err) {
+        console.error(`  ❌ Error enviando a ${telefono}:`, err.message);
+      }
+    }
+    console.log(`  👔 ${telefonosArray.length} encargado(s) notificado(s) sobre ${rows.length} evento(s)`);
 
   } catch (err) {
     console.error('❌ Error en cron de recordatorios staff:', err.message);
