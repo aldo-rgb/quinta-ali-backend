@@ -27,9 +27,13 @@ const uploadINE = multer({
   },
 });
 
-// GET /api/reservaciones — Listar reservaciones (admin)
+// GET /api/reservaciones — Listar reservaciones (admin, excluye archivadas por defecto)
 router.get('/', adminAuth, async (req, res) => {
   try {
+    const { incluir_archivadas } = req.query; // ?incluir_archivadas=true para ver todas
+    
+    const archivadasCondition = incluir_archivadas === 'true' ? '' : 'AND r.archivada = FALSE';
+    
     const { rows } = await pool.query(`
       SELECT r.*, 
              c.nombre AS cliente_nombre, c.apellido AS cliente_apellido, c.telefono AS cliente_telefono, c.email AS cliente_email,
@@ -37,7 +41,8 @@ router.get('/', adminAuth, async (req, res) => {
       FROM reservaciones r
       JOIN clientes c ON r.cliente_id = c.id
       JOIN paquetes p ON r.paquete_id = p.id
-      ORDER BY r.fecha_evento ASC, r.hora_inicio ASC
+      WHERE 1=1 ${archivadasCondition}
+      ORDER BY r.fecha_evento DESC, r.hora_inicio DESC
     `);
     res.json(rows);
   } catch (err) {
@@ -626,6 +631,34 @@ router.patch('/:id/anticipo', adminAuth, async (req, res) => {
   } catch (err) {
     console.error('❌ Error registrando anticipo:', err.message);
     res.status(500).json({ message: 'Error al registrar el anticipo' });
+  }
+});
+
+// PATCH /api/reservaciones/:id/archivar — Archivar o desarchivar reservación (admin)
+router.patch('/:id/archivar', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { archivada } = req.body;
+
+    if (archivada === undefined || archivada === null) {
+      return res.status(400).json({ message: 'Se requiere estado archivada (true/false)' });
+    }
+
+    const result = await pool.query(
+      `UPDATE reservaciones SET archivada = $1, actualizado_en = NOW() WHERE id = $2 RETURNING *`,
+      [archivada, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Reservación no encontrada' });
+    }
+
+    const accion = archivada ? 'archivada' : 'desarchivada';
+    console.log(`📦 Reservación ${id} ${accion}`);
+    res.json({ message: `Reservación ${accion} exitosamente`, reservacion: result.rows[0] });
+  } catch (err) {
+    console.error('❌ Error archivando reservación:', err.message);
+    res.status(500).json({ message: 'Error al archivar la reservación' });
   }
 });
 
