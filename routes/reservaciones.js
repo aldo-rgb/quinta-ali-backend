@@ -356,12 +356,19 @@ router.post('/completa', async (req, res) => {
         clienteId = nuevoCliente.rows[0].id;
       }
     } else {
-      // Usuario invitado - SIEMPRE crear un nuevo cliente (permitir duplicados de email)
-      const nuevoCliente = await client.query(
-        `INSERT INTO clientes (nombre, apellido, telefono, email, es_invitado) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [nombre, apellido || '', telefono || null, email, true]
-      );
-      clienteId = nuevoCliente.rows[0].id;
+      // Usuario invitado - buscar por email, pero NO actualizar nombre (preservar el original)
+      const existente = await client.query('SELECT id FROM clientes WHERE email = $1', [email]);
+      if (existente.rows.length > 0) {
+        // Cliente ya existe - reutilizar sin cambiar su nombre
+        clienteId = existente.rows[0].id;
+      } else {
+        // Crear nuevo cliente invitado
+        const nuevoCliente = await client.query(
+          `INSERT INTO clientes (nombre, apellido, telefono, email, es_invitado) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [nombre, apellido || '', telefono || null, email, true]
+        );
+        clienteId = nuevoCliente.rows[0].id;
+      }
     }
 
     // 2. Obtener paquete
