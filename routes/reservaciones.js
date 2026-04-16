@@ -334,27 +334,32 @@ router.post('/completa', async (req, res) => {
 
     await client.query('BEGIN');
 
-    // 1. Crear o encontrar cliente (buscar por google_id, luego email)
+    // 1. Crear o encontrar cliente
     let clienteId;
-    let existente;
 
+    // Si tiene google_id, buscar por google_id (usuario autenticado)
     if (google_id) {
-      existente = await client.query('SELECT id FROM clientes WHERE google_id = $1', [google_id]);
-    }
-    if (!existente || existente.rows.length === 0) {
-      existente = await client.query('SELECT id FROM clientes WHERE email = $1', [email]);
-    }
-
-    if (existente.rows.length > 0) {
-      clienteId = existente.rows[0].id;
-      await client.query(
-        `UPDATE clientes SET nombre = $1, apellido = $2, telefono = $3, google_id = COALESCE($4, google_id), es_invitado = $5, actualizado_en = NOW() WHERE id = $6`,
-        [nombre, apellido || '', telefono || null, google_id || null, es_invitado || false, clienteId]
-      );
+      const existente = await client.query('SELECT id FROM clientes WHERE google_id = $1', [google_id]);
+      if (existente.rows.length > 0) {
+        clienteId = existente.rows[0].id;
+        // Actualizar datos del cliente autenticado
+        await client.query(
+          `UPDATE clientes SET nombre = $1, apellido = $2, telefono = $3, actualizado_en = NOW() WHERE id = $4`,
+          [nombre, apellido || '', telefono || null, clienteId]
+        );
+      } else {
+        // Crear nuevo cliente autenticado
+        const nuevoCliente = await client.query(
+          `INSERT INTO clientes (nombre, apellido, telefono, email, google_id, es_invitado) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [nombre, apellido || '', telefono || null, email, google_id, false]
+        );
+        clienteId = nuevoCliente.rows[0].id;
+      }
     } else {
+      // Usuario invitado - SIEMPRE crear un nuevo cliente (permitir duplicados de email)
       const nuevoCliente = await client.query(
-        `INSERT INTO clientes (nombre, apellido, telefono, email, google_id, es_invitado) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [nombre, apellido || '', telefono || null, email, google_id || null, es_invitado || false]
+        `INSERT INTO clientes (nombre, apellido, telefono, email, es_invitado) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [nombre, apellido || '', telefono || null, email, true]
       );
       clienteId = nuevoCliente.rows[0].id;
     }
