@@ -367,14 +367,22 @@ router.post('/completa', async (req, res) => {
     }
     const paquete = paqRes.rows[0];
 
-    // 3. Calcular hora_fin
+    // 3. Calcular hora_fin y fecha_fin
     let hora_fin;
+    let fecha_fin_calculada = fecha_fin; // Si no viene, quedará null para noche o se asignará para horas
+    
     if (paquete.tipo_duracion === 'noche') {
       hora_fin = '23:59';
+      // Para paquetes de noche, si no viene fecha_fin, usar fecha_evento
+      if (!fecha_fin_calculada) {
+        fecha_fin_calculada = fecha_evento;
+      }
     } else {
+      // Para paquetes de horas, fecha_fin siempre es igual a fecha_evento
       const [h, m] = hora_inicio.split(':').map(Number);
       const finH = h + (paquete.duracion_horas || 4);
       hora_fin = `${String(Math.min(finH, 23)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      fecha_fin_calculada = fecha_evento;
     }
 
     // 4. Calcular total con extras y precio dinámico
@@ -453,7 +461,7 @@ router.post('/completa', async (req, res) => {
       `INSERT INTO reservaciones (cliente_id, paquete_id, fecha_evento, fecha_fin, hora_inicio, hora_fin, num_invitados, monto_total, notas, ine_url, promotor, promotor_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [clienteId, paquete_id, fecha_evento, fecha_fin || null, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null, promotor || null, promotorId]
+      [clienteId, paquete_id, fecha_evento, fecha_fin_calculada, hora_inicio, hora_fin, num_invitados || null, montoTotalDinamico, notas || null, ine_url || null, promotor || null, promotorId]
     );
 
     const reservacionId = rows[0].id;
