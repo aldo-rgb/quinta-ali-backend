@@ -716,4 +716,38 @@ router.post('/subir-ine', uploadINE.single('ine'), async (req, res) => {
   }
 });
 
+// POST /api/reservaciones/archivar-vencidas — Archivar automáticamente todas las vencidas (admin)
+router.post('/archivar-vencidas', adminAuth, async (req, res) => {
+  try {
+    const hoy = new Date().toISOString().split('T')[0];
+    
+    const result = await pool.query(
+      `UPDATE reservaciones 
+       SET archivada = TRUE, actualizado_en = NOW() 
+       WHERE archivada = FALSE 
+       AND COALESCE(fecha_fin, fecha_evento) < $1::date 
+       RETURNING id, cliente_nombre, fecha_evento`,
+      [hoy]
+    );
+
+    if (result.rowCount > 0) {
+      console.log(`✅ ${result.rowCount} reservaciones archivadas automáticamente`);
+      res.json({ 
+        message: `${result.rowCount} reservaciones archivadas exitosamente`, 
+        cantidad: result.rowCount,
+        reservaciones: result.rows 
+      });
+    } else {
+      res.json({ 
+        message: 'No hay reservaciones vencidas para archivar', 
+        cantidad: 0,
+        reservaciones: [] 
+      });
+    }
+  } catch (err) {
+    console.error('❌ Error en archivado automático:', err.message);
+    res.status(500).json({ message: 'Error al archivar reservaciones vencidas' });
+  }
+});
+
 module.exports = router;

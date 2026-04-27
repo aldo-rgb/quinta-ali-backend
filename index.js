@@ -129,4 +129,31 @@ app.listen(PORT, async () => {
     }
   }, { timezone: 'America/Monterrey' });
   console.log('⭐ Cron de reseñas WhatsApp activo (diario 12:00 PM)');
+
+  // Cron: Archivar automáticamente reservaciones vencidas (3:00 AM)
+  cron.schedule('0 3 * * *', async () => {
+    console.log('🗂️ Ejecutando cron de archivado automático de reservaciones vencidas...');
+    try {
+      const pool = require('./db/connection');
+      const hoy = new Date().toISOString().split('T')[0];
+      
+      const result = await pool.query(
+        `UPDATE reservaciones 
+         SET archivada = TRUE, actualizado_en = NOW() 
+         WHERE archivada = FALSE 
+         AND COALESCE(fecha_fin, fecha_evento) < $1::date 
+         RETURNING id, cliente_id, fecha_evento`,
+        [hoy]
+      );
+      
+      if (result.rowCount > 0) {
+        console.log(`✅ ${result.rowCount} reservaciones archivadas automáticamente`);
+      } else {
+        console.log('ℹ️ No hay reservaciones vencidas para archivar');
+      }
+    } catch (err) {
+      console.error('❌ Error en cron de archivado automático:', err.message);
+    }
+  }, { timezone: 'America/Monterrey' });
+  console.log('🗂️ Cron de archivado automático activo (diario 03:00 AM)');
 });
