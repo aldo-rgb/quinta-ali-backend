@@ -643,17 +643,23 @@ router.patch('/:id/anticipo', adminAuth, async (req, res) => {
       return res.status(400).json({ message: `El monto pagado no puede exceder $${montoTotal}` });
     }
 
-    // Si el monto pagado es >= monto total, cambiar estado a 'pagada'
-    const nuevoEstado = montoPagado >= montoTotal ? 'pagada' : null;
-    
+    // Usar CASE para cambiar estado a 'pagada' SOLO cuando se pague el 100%
     const result = await pool.query(
       `UPDATE reservaciones 
-       SET monto_pagado = $1, 
-           ${nuevoEstado ? "estado = $2," : ""}
+       SET monto_pagado = $1,
+           estado = CASE 
+                      WHEN $1 >= monto_total THEN 'pagada'
+                      ELSE estado
+                    END,
            actualizado_en = NOW() 
-       WHERE id = $3 RETURNING *`,
-      nuevoEstado ? [montoPagado, nuevoEstado, id] : [montoPagado, id]
+       WHERE id = $2 
+       RETURNING *`,
+      [montoPagado, id]
     );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Reservación no encontrada' });
+    }
 
     const esPagoCompleto = montoPagado >= montoTotal;
     console.log(`${esPagoCompleto ? '✅ PAGO COMPLETO' : '💰 Anticipo'} registrado para reservación ${id}: $${montoPagado}/$${montoTotal}`);
