@@ -643,12 +643,20 @@ router.patch('/:id/anticipo', adminAuth, async (req, res) => {
       return res.status(400).json({ message: `El monto pagado no puede exceder $${montoTotal}` });
     }
 
+    // Si el monto pagado es >= monto total, cambiar estado a 'pagada'
+    const nuevoEstado = montoPagado >= montoTotal ? 'pagada' : null;
+    
     const result = await pool.query(
-      `UPDATE reservaciones SET monto_pagado = $1, actualizado_en = NOW() WHERE id = $2 RETURNING *`,
-      [montoPagado, id]
+      `UPDATE reservaciones 
+       SET monto_pagado = $1, 
+           ${nuevoEstado ? "estado = $2," : ""}
+           actualizado_en = NOW() 
+       WHERE id = $3 RETURNING *`,
+      nuevoEstado ? [montoPagado, nuevoEstado, id] : [montoPagado, id]
     );
 
-    console.log(`💰 Anticipo registrado para reservación ${id}: $${montoPagado}`);
+    const esPagoCompleto = montoPagado >= montoTotal;
+    console.log(`${esPagoCompleto ? '✅ PAGO COMPLETO' : '💰 Anticipo'} registrado para reservación ${id}: $${montoPagado}/$${montoTotal}`);
     res.json({ message: 'Anticipo registrado exitosamente', reservacion: result.rows[0] });
   } catch (err) {
     console.error('❌ Error registrando anticipo:', err.message);
