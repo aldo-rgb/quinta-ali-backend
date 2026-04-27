@@ -666,14 +666,15 @@ router.patch('/:id/notas', adminAuth, async (req, res) => {
       return res.status(400).json({ message: 'Se requiere campo notas' });
     }
 
-    // Validar longitud máxima (1000 caracteres)
-    if (String(notas).length > 1000) {
+    // Convertir a string y validar longitud máxima (1000 caracteres)
+    const notasString = String(notas).trim();
+    if (notasString.length > 1000) {
       return res.status(400).json({ message: 'Las notas no pueden exceder 1000 caracteres' });
     }
 
     const result = await pool.query(
       `UPDATE reservaciones SET notas = $1, actualizado_en = NOW() WHERE id = $2 RETURNING *`,
-      [notas.trim() || null, id]
+      [notasString || null, id]
     );
 
     if (result.rows.length === 0) {
