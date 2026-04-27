@@ -319,6 +319,29 @@ router.patch('/:id/checkout', adminAuth, async (req, res) => {
   }
 });
 
+// GET /api/reservaciones/diagnostico — Ver reservaciones con estado incorrecto (admin)
+router.get('/diagnostico', adminAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, monto_pagado, monto_total, estado, cliente_nombre
+       FROM reservaciones 
+       WHERE estado = 'pagada' 
+       AND monto_pagado < monto_total
+       AND monto_pagado > 0
+       ORDER BY id DESC`
+    );
+
+    res.json({ 
+      message: `${result.rowCount} reservaciones encontradas con estado incorrecto`,
+      cantidad: result.rowCount,
+      reservaciones: result.rows 
+    });
+  } catch (err) {
+    console.error('❌ Error en diagnóstico:', err.message);
+    res.status(500).json({ message: 'Error en diagnóstico' });
+  }
+});
+
 // POST /api/reservaciones/reparar-estados — Reparar reservaciones con estado incorrecto (admin)
 router.post('/reparar-estados', adminAuth, async (req, res) => {
   try {
