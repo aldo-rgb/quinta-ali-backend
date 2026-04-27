@@ -349,7 +349,7 @@ router.post('/reparar-estados', adminAuth, async (req, res) => {
     
     // Primero verificar cuáles están mal
     const diagnostico = await pool.query(
-      `SELECT id, monto_pagado, monto_total, estado, cliente_nombre
+      `SELECT id, monto_pagado, monto_total, estado, cliente_id
        FROM reservaciones 
        WHERE estado = 'pagada' 
        AND monto_pagado < monto_total
@@ -358,7 +358,7 @@ router.post('/reparar-estados', adminAuth, async (req, res) => {
     
     console.log(`📊 Diagnostico: ${diagnostico.rowCount} reservaciones encontradas`);
     diagnostico.rows.slice(0, 5).forEach(row => {
-      console.log(`   ${row.id}: ${row.cliente_nombre} - ${row.monto_pagado}/${row.monto_total}`);
+      console.log(`   Res ${row.id} (cliente ${row.cliente_id}): ${row.monto_pagado}/${row.monto_total}`);
     });
 
     // Ahora reparar
@@ -368,14 +368,14 @@ router.post('/reparar-estados', adminAuth, async (req, res) => {
        WHERE estado = 'pagada' 
        AND monto_pagado < monto_total
        AND monto_pagado > 0
-       RETURNING id, monto_pagado, monto_total, estado, cliente_nombre`
+       RETURNING id, monto_pagado, monto_total, estado`
     );
 
     if (result.rowCount > 0) {
       console.log(`✅ ${result.rowCount} reservaciones reparadas - cambio de estado 'pagada' a 'confirmada'`);
       result.rows.forEach(row => {
         const porcentaje = Math.round((Number(row.monto_pagado) / Number(row.monto_total)) * 100);
-        console.log(`   Res ${row.id} (${row.cliente_nombre}): ${porcentaje}% pagado (${row.monto_pagado}/${row.monto_total}) → estado: ${row.estado}`);
+        console.log(`   Res ${row.id}: ${porcentaje}% pagado (${row.monto_pagado}/${row.monto_total}) → estado: ${row.estado}`);
       });
     } else {
       console.log('ℹ️  No hay reservaciones que reparar (todas están correctas)');
