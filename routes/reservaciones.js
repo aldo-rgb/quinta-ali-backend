@@ -763,6 +763,38 @@ router.post('/subir-ine', uploadINE.single('ine'), async (req, res) => {
   }
 });
 
+// POST /api/reservaciones/reparar-estados — Reparar reservaciones con estado incorrecto (admin)
+router.post('/reparar-estados', adminAuth, async (req, res) => {
+  try {
+    // Buscar todas las reservaciones marcadas como 'pagada' pero con pago parcial
+    const result = await pool.query(
+      `UPDATE reservaciones 
+       SET estado = 'confirmada', actualizado_en = NOW()
+       WHERE estado = 'pagada' 
+       AND monto_pagado < monto_total
+       AND monto_pagado > 0
+       RETURNING id, monto_pagado, monto_total, estado`
+    );
+
+    if (result.rowCount > 0) {
+      console.log(`✅ ${result.rowCount} reservaciones reparadas - cambio de estado 'pagada' a 'confirmada'`);
+      result.rows.forEach(row => {
+        const porcentaje = Math.round((Number(row.monto_pagado) / Number(row.monto_total)) * 100);
+        console.log(`   Res ${row.id}: ${porcentaje}% pagado (${row.monto_pagado}/${row.monto_total})`);
+      });
+    }
+
+    res.json({ 
+      message: `${result.rowCount} reservaciones reparadas`,
+      cantidad: result.rowCount,
+      reservaciones: result.rows 
+    });
+  } catch (err) {
+    console.error('❌ Error reparando estados:', err.message);
+    res.status(500).json({ message: 'Error al reparar estados de reservaciones' });
+  }
+});
+
 // POST /api/reservaciones/archivar-vencidas — Archivar automáticamente todas las vencidas (admin)
 router.post('/archivar-vencidas', adminAuth, async (req, res) => {
   try {
