@@ -656,6 +656,38 @@ router.patch('/:id/anticipo', adminAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/reservaciones/:id/notas — Actualizar comentarios/notas (admin)
+router.patch('/:id/notas', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notas } = req.body;
+
+    if (notas === undefined || notas === null) {
+      return res.status(400).json({ message: 'Se requiere campo notas' });
+    }
+
+    // Validar longitud máxima (1000 caracteres)
+    if (String(notas).length > 1000) {
+      return res.status(400).json({ message: 'Las notas no pueden exceder 1000 caracteres' });
+    }
+
+    const result = await pool.query(
+      `UPDATE reservaciones SET notas = $1, actualizado_en = NOW() WHERE id = $2 RETURNING *`,
+      [notas.trim() || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Reservación no encontrada' });
+    }
+
+    console.log(`📝 Notas actualizadas para reservación ${id}`);
+    res.json({ message: 'Notas actualizadas exitosamente', reservacion: result.rows[0] });
+  } catch (err) {
+    console.error('❌ Error actualizando notas:', err.message);
+    res.status(500).json({ message: 'Error al actualizar las notas' });
+  }
+});
+
 // PATCH /api/reservaciones/:id/archivar — Archivar o desarchivar reservación (admin)
 router.patch('/:id/archivar', adminAuth, async (req, res) => {
   try {
