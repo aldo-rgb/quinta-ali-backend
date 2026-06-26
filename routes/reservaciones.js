@@ -169,20 +169,26 @@ router.get('/calendario', async (req, res) => {
       
       while (fechaActual <= fechaFinDate) {
         const dateStr = fechaActual.toISOString().split('T')[0];
-        if (!porDia[dateStr]) porDia[dateStr] = { reservaciones: 0, tiene_noche: false };
+        if (!porDia[dateStr]) porDia[dateStr] = { reservaciones: 0, tiene_noche: false, tiene_horas: false };
         porDia[dateStr].reservaciones++;
         if (r.tipo_duracion === 'noche') porDia[dateStr].tiene_noche = true;
+        if (r.tipo_duracion === 'horas') porDia[dateStr].tiene_horas = true;
         fechaActual.setDate(fechaActual.getDate() + 1);
       }
     }
 
-    // Construir respuesta: array de { fecha, reservaciones, disponible }
+    // Construir respuesta: { fecha, reservaciones, disponible, tipo }
     const calendario = {};
     for (const [fecha, info] of Object.entries(porDia)) {
+      let tipo = null;
+      if (info.tiene_noche && info.tiene_horas) tipo = 'mixto';
+      else if (info.tiene_noche) tipo = 'hospedaje';
+      else if (info.tiene_horas) tipo = 'basico';
+
       calendario[fecha] = {
         reservaciones: info.reservaciones,
-        // Un día está disponible SOLO si NO tiene ninguna reservación
         disponible: info.reservaciones === 0 && !info.tiene_noche,
+        tipo,
       };
     }
 
