@@ -17,13 +17,18 @@ const rino = require('./rino');
 const MAX_INTENTOS = 10;
 const PAGINAS_SYNC = 10;
 
+/** creado_por de las tareas que salen solas al llegar un reporte de cliente. */
+const CREADO_AUTOMATICO = 'reporte de cliente (automático)';
+
 function descripcionParaRino(t) {
   return [
     t.descripcion,
     t.involucrados?.length ? `Involucrados: ${t.involucrados.map((i) => i.nombre || i.email).join(', ')}` : null,
     t.area ? `Área: ${t.area}` : null,
     t.ticket_id ? `Viene del reporte de cliente #${t.ticket_id}` : null,
-    `(Enviada desde el admin de Quinta de Ali${t.creado_por ? ` por ${t.creado_por}` : ''})`,
+    t.creado_por === CREADO_AUTOMATICO
+      ? '(Enviada automáticamente por Quinta de Ali al recibir el reporte)'
+      : `(Enviada desde el admin de Quinta de Ali${t.creado_por ? ` por ${t.creado_por}` : ''})`,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -205,6 +210,7 @@ async function comprobantesDe(id) {
 }
 
 module.exports = {
+  CREADO_AUTOMATICO,
   crearTarea,
   enviarTarea,
   reintentarPendientes,

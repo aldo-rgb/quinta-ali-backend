@@ -78,7 +78,7 @@ router.post('/reportes', reporteLimiter, async (req, res) => {
       responsableEmail: REPORTES_RESPONSABLE,
       involucradosEmails: REPORTES_INVOLUCRADOS,
       ticketId: id,
-      creadoPor: 'reporte de cliente (automático)',
+      creadoPor: tareasRino.CREADO_AUTOMATICO,
     }).catch((err) => console.error(`Error mandando el reporte #${id} a Rino:`, err.message));
   } catch (err) {
     console.error('Error guardando reporte de cliente:', err.message);
