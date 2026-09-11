@@ -75,7 +75,7 @@ async function migrarRino(pool) {
       ON tareas_rino(creado_en) WHERE envio_estado IN ('pendiente','error')
   `);
   // Involucrados además del responsable: [{ email, nombre }]. Rino acepta un solo
-  // responsable por tarea; los involucrados viajan aparte y en la descripción.
+  // responsable por tarea; los involucrados viajan en task.participants.
   await pool.query(`ALTER TABLE tareas_rino ADD COLUMN IF NOT EXISTS involucrados JSONB NOT NULL DEFAULT '[]'::jsonb`);
 
   // pendientes_rino — buzón de pendientes (manual del socio): peticiones de

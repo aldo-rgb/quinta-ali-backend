@@ -23,7 +23,6 @@ const CREADO_AUTOMATICO = 'reporte de cliente (automático)';
 function descripcionParaRino(t) {
   return [
     t.descripcion,
-    t.involucrados?.length ? `Involucrados: ${t.involucrados.map((i) => i.nombre || i.email).join(', ')}` : null,
     t.area ? `Área: ${t.area}` : null,
     t.ticket_id ? `Viene del reporte de cliente #${t.ticket_id}` : null,
     t.creado_por === CREADO_AUTOMATICO
@@ -44,8 +43,7 @@ function payloadTarea(t) {
       // Rino reemplaza el responsable por el que llegue aquí.
       assignee_email: t.responsable_rino_email || t.responsable_email || null,
       due_at: t.fecha_limite ? new Date(t.fecha_limite).toISOString() : null,
-      // Mismo nombre que usa EntregaX. Rino todavía no lo aplica a socios; mientras
-      // tanto los involucrados también van en la descripción.
+      // Mismo nombre que usa EntregaX: Rino agrega a cada correo como involucrado y le avisa.
       participants: (t.involucrados || []).map((i) => ({ email: i.email, nombre: i.nombre })),
     },
   };
