@@ -22,26 +22,29 @@ const TIMEOUT_MS = 20000;
 const VIDA_CACHE_USUARIOS = 5 * 60 * 1000;
 
 /**
- * Quién de Rino se puede elegir como responsable desde Quinta y con qué nombre
- * se muestra aquí: "correo=Nombre", separados por coma. Vacío = todo el
- * personal de Rino con su nombre de allá. Solo cambia lo que ve Quinta; en
- * Rino cada quien conserva su nombre.
+ * Cómo ve Quinta al personal de Rino. Solo cambia lo que se muestra y se puede
+ * elegir aquí; en Rino cada quien conserva su nombre.
+ *   RINO_OCULTOS  correos que no aparecen como responsables, separados por coma
+ *   RINO_ALIAS    "correo=Nombre", separados por coma; con alias no se muestra el puesto
  */
-const RESPONSABLES = parsearResponsables(process.env.RINO_RESPONSABLES ?? 'aldo@zaia.mx=Aldo Sistemas');
+const OCULTOS = new Set(lista(process.env.RINO_OCULTOS ?? 'camposaldo5@gmail.com').map((c) => c.toLowerCase()));
 
-function parsearResponsables(texto) {
-  const mapa = new Map();
-  for (const parte of String(texto).split(',')) {
-    const [correo, ...nombre] = parte.split('=');
-    const email = correo.trim().toLowerCase();
-    if (email) mapa.set(email, nombre.join('=').trim() || null);
-  }
-  return mapa;
+const ALIAS = new Map(
+  lista(process.env.RINO_ALIAS ?? 'aldo@zaia.mx=Aldo Sistemas')
+    .map((parte) => {
+      const [correo, ...nombre] = parte.split('=');
+      return [correo.trim().toLowerCase(), nombre.join('=').trim()];
+    })
+    .filter(([correo, nombre]) => correo && nombre)
+);
+
+function lista(texto) {
+  return String(texto).split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 /** El nombre con que Quinta muestra a alguien de Rino. */
 function nombreResponsable(email, nombreEnRino) {
-  return RESPONSABLES.get(String(email ?? '').toLowerCase()) || nombreEnRino || null;
+  return ALIAS.get(String(email ?? '').toLowerCase()) || nombreEnRino || null;
 }
 
 function configurado() {
@@ -127,16 +130,13 @@ async function consultarUsuarios({ fresco = false } = {}) {
   if (status !== 200 || !datos?.ok) {
     throw new Error(`Rino /api/sync/usuarios HTTP ${status}: ${datos?.error || texto.slice(0, 200)}`);
   }
-  let usuarios = datos.usuarios || [];
-  if (RESPONSABLES.size > 0) {
-    usuarios = usuarios
-      .filter((u) => RESPONSABLES.has(String(u.email).toLowerCase()))
-      .map((u) => {
-        const alias = RESPONSABLES.get(String(u.email).toLowerCase());
-        // Con alias se muestra solo el alias: el puesto de allá no aplica aquí.
-        return alias ? { ...u, nombre: alias, puesto: null } : u;
-      });
-  }
+  const usuarios = (datos.usuarios || [])
+    .filter((u) => !OCULTOS.has(String(u.email).toLowerCase()))
+    .map((u) => {
+      const alias = ALIAS.get(String(u.email).toLowerCase());
+      // Con alias se muestra solo el alias: el puesto de allá no aplica aquí.
+      return alias ? { ...u, nombre: alias, puesto: null } : u;
+    });
   cacheUsuarios = { en: Date.now(), usuarios };
   return cacheUsuarios.usuarios;
 }
