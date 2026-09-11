@@ -18,8 +18,8 @@ app.use(cors(corsOptions));
 
 // Eventos de Rino Living: la firma va sobre el cuerpo CRUDO, por eso se monta antes de express.json()
 app.use('/api/rino/eventos', express.raw({ type: '*/*', limit: '1mb' }), require('./routes/rinoEventos'));
-// Consultas en el momento de Rino (disponibilidad y apartar fechas): también firmadas sobre el cuerpo crudo
-app.use('/api/rino', require('./routes/rinoReservas'));
+// Consultas en el momento de Rino (disponibilidad, apartar fechas, reportes de clientes): también firmadas sobre el cuerpo crudo
+app.use('/api/rino', require('./routes/rinoConsultas'));
 
 app.use(express.json());
 
