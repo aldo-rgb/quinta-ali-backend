@@ -121,7 +121,8 @@ async function sincronizarTareas() {
            completada_en = $5, rino_actualizado_en = $6, actualizado_en = NOW()
          WHERE id::text = $1
          RETURNING ticket_id`,
-        [String(t.id), t.status, t.responsable, t.responsable_email, t.completed_at, t.updated_at]
+        [String(t.id), t.status, rino.nombreResponsable(t.responsable_email, t.responsable),
+          t.responsable_email, t.completed_at, t.updated_at]
       );
       if (!r.rowCount) continue;
       actualizadas++;
