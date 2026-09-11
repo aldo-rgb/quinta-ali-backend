@@ -30,7 +30,7 @@ const adminAuth = require('../middleware/adminAuth');
 const rino = require('../services/rino');
 const tareasRino = require('../services/tareasRino');
 const pendientesRino = require('../services/pendientesRino');
-const whatsapp = require('../services/whatsapp');
+const { crearTicket } = require('../services/ticketsServicio');
 
 const router = Router();
 
@@ -58,23 +58,7 @@ router.post('/reportes', reporteLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Indica el área y describe el problema' });
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO tickets_servicio (origen, categoria, descripcion, contacto)
-       VALUES ('reporte_web', $1, $2, $3) RETURNING id`,
-      [area, problema, contacto]
-    );
-    const id = rows[0].id;
-
-    // Aviso al admin sin hacer esperar al cliente.
-    if (process.env.ADMIN_WHATSAPP) {
-      whatsapp.enviarMensaje(
-        process.env.ADMIN_WHATSAPP,
-        `🆘 *Reporte de cliente #${id}*\n\n📍 ${area}\n📝 ${problema}` +
-          (contacto ? `\n👤 ${contacto}` : '') +
-          `\n\nEntra al panel admin → Rino para mandarlo a mantenimiento.`
-      );
-    }
-
+    const id = await crearTicket({ origen: 'reporte_web', categoria: area, descripcion: problema, contacto });
     res.status(201).json({ ok: true, id });
   } catch (err) {
     console.error('Error guardando reporte de cliente:', err.message);

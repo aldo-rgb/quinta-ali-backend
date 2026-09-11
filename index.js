@@ -51,6 +51,7 @@ app.use('/api/promotores', require('./routes/promotores'));
 app.use('/api/google-reviews', require('./routes/google-reviews'));
 app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/rino', require('./routes/rino')); // Puente con Rino Living (rutas admin protegidas adentro)
+app.use('/api/opiniones', require('./routes/opiniones')); // Reseñas y quejas por QR (/opina)
 
 // Ruta de prueba
 app.get('/', (req, res) => {
@@ -115,6 +116,14 @@ app.listen(PORT, async () => {
     console.log('✅ Tablas del puente con Rino verificadas');
   } catch (err) {
     console.error('⚠️ Error creando tablas del puente con Rino:', err.message);
+  }
+
+  // Migración 5: reseñas locales del QR (depende de tickets_servicio)
+  try {
+    await require('./db/migrate-opiniones')(require('./db/connection'));
+    console.log('✅ Tabla de reseñas locales verificada');
+  } catch (err) {
+    console.error('⚠️ Error creando tabla de reseñas locales:', err.message);
   }
 
   // Para correr el backend en local sin mandar WhatsApps reales: la base es la de producción.

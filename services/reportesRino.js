@@ -5,8 +5,8 @@
  * al admin de Quinta. Pregunta en el momento, como el calendario:
  *   consultar({ desde, hasta, estado }) → reportes, con la tarea de Rino ligada si la hay
  *
- * Hoy los reportes llegan desde /reporte (origen reporte_web); tickets_servicio
- * ya admite bot_whatsapp y resena para cuando se conecten.
+ * Orígenes: reporte_web (/reporte), queja y resena de 1 a 3 estrellas (/opina).
+ * tickets_servicio ya admite bot_whatsapp para cuando se conecte el bot.
  */
 const pool = require('../db/connection');
 

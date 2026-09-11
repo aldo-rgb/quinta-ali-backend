@@ -15,7 +15,7 @@ async function migrarRino(pool) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tickets_servicio (
       id              SERIAL PRIMARY KEY,
-      origen          VARCHAR(20) NOT NULL CHECK (origen IN ('reporte_web','bot_whatsapp','resena')),
+      origen          VARCHAR(20) NOT NULL CHECK (origen IN ('reporte_web','bot_whatsapp','resena','queja')),
       categoria       VARCHAR(60),
       descripcion     TEXT NOT NULL,
       urgencia        VARCHAR(10),
@@ -28,6 +28,19 @@ async function migrarRino(pool) {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_tickets_servicio_estado ON tickets_servicio(estado, creado_en DESC)`);
+  // Quejas del QR (/opina). Solo se rehace la restricción si todavía no admite 'queja'.
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'tickets_servicio_origen_check' AND pg_get_constraintdef(oid) LIKE '%queja%'
+      ) THEN
+        ALTER TABLE tickets_servicio DROP CONSTRAINT IF EXISTS tickets_servicio_origen_check;
+        ALTER TABLE tickets_servicio ADD CONSTRAINT tickets_servicio_origen_check
+          CHECK (origen IN ('reporte_web','bot_whatsapp','resena','queja'));
+      END IF;
+    END $$
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS tareas_rino (
