@@ -7,11 +7,12 @@
  *   disponibilidad({ desde, hasta }) → lo que ocupa al menos un día del rango
  *   apartar({ reserva })             → préstamo de día completo, confirmado
  *
- * Lo que aparta Rino es la quinta PRESTADA a familia o conocidos: no paga ni
- * genera contrato. Entra confirmada, con monto $0 (los montos que manden se
- * ignoran) y con el paquete "Prestada Rino · Con noche" o "· Solo día", que es
- * lo único que importa del paquete: si se quedan a dormir. El PIN de acceso se
- * da a mano desde el admin.
+ * Lo que aparta Rino es la quinta PRESTADA a familia o conocidos, sin contrato.
+ * Entra confirmada, sin costo o con la cuota simbólica que manden (monto_total
+ * y concepto_monto, p. ej. $2,000 de limpieza, registrada como monto por cobrar;
+ * el anticipo se ignora), y con el paquete "Prestada Rino · Con noche" o
+ * "· Solo día", que es lo único que importa del paquete: si se quedan a dormir.
+ * El PIN de acceso se da a mano desde el admin.
  */
 const pool = require('../db/connection');
 const whatsapp = require('./whatsapp');
@@ -41,6 +42,10 @@ function fechaLegible(iso) {
 
 function diasEntre(desde, hasta) {
   return Math.round((Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / 864e5);
+}
+
+function pesos(n) {
+  return `$${Number(n).toLocaleString('es-MX')}`;
 }
 
 /** true / false, o null si Rino no lo dijo. Acepta `se_quedan_a_dormir` o `paquete`. */
@@ -139,6 +144,9 @@ async function apartar(cuerpo) {
   const tipoEvento = String(r.tipo_evento ?? '').trim().slice(0, 80) || null;
   const personas = r.personas === null || r.personas === undefined || r.personas === '' ? null : Number(r.personas);
   const dormir = seQuedanADormir(r);
+  // Cuota simbólica (limpieza, etc.). Sin monto o en 0, es sin costo.
+  const cuota = r.monto_total === null || r.monto_total === undefined || r.monto_total === '' ? 0 : Number(r.monto_total);
+  const concepto = String(r.concepto_monto ?? '').trim().slice(0, 80) || null;
 
   // El detalle se le muestra tal cual a quien aparta: va escrito para una persona.
   const error =
@@ -149,6 +157,7 @@ async function apartar(cuerpo) {
     diasEntre(inicio, fin) > MAX_DIAS_APARTADO ? `No se pueden apartar más de ${MAX_DIAS_APARTADO} días seguidos` :
     !cliente ? 'Falta el nombre de quien usa la quinta' :
     personas !== null && !(Number.isInteger(personas) && personas >= 0) ? 'Las personas van como número entero' :
+    !(Number.isFinite(cuota) && cuota >= 0) ? 'La cuota va como número sin signo' :
     null;
   if (error) return { ok: false, resultado: 'no_aplicado', detalle: error };
 
@@ -186,8 +195,11 @@ async function apartar(cuerpo) {
     const clienteId = await clienteParaRino(client, { nombre: cliente, telefono, rinoId });
 
     const solicita = String(r.solicita ?? '').trim().slice(0, 80);
+    const costo = cuota > 0
+      ? `con cuota simbólica de ${pesos(cuota)}${concepto ? ` por ${concepto}` : ''}`
+      : 'sin costo';
     const notas = [
-      `Prestada por Grupo Rino${solicita ? ` (la pidió ${solicita})` : ''}, sin costo.`,
+      `Prestada por Grupo Rino${solicita ? ` (la pidió ${solicita})` : ''}, ${costo}.`,
       `Se quedan a dormir: ${dormir === true ? 'sí' : dormir === false ? 'no' : 'sin especificar'}`,
       tipoEvento ? `Motivo: ${tipoEvento}` : null,
       String(r.notas ?? '').trim() || null,
@@ -197,9 +209,9 @@ async function apartar(cuerpo) {
       `INSERT INTO reservaciones
          (cliente_id, paquete_id, fecha_evento, fecha_fin, hora_inicio, hora_fin, num_invitados,
           estado, monto_total, monto_pagado, notas, tipo_evento, rino_reserva_id)
-       VALUES ($1, $2, $3, $4, '00:00', '23:59', $5, 'confirmada', 0, 0, $6, $7, $8)
+       VALUES ($1, $2, $3, $4, '00:00', '23:59', $5, 'confirmada', $6, 0, $7, $8, $9)
        RETURNING id`,
-      [clienteId, paquete.rows[0].id, inicio, fin, personas, notas, tipoEvento, rinoId]
+      [clienteId, paquete.rows[0].id, inicio, fin, personas, cuota, notas, tipoEvento, rinoId]
     );
     await client.query('COMMIT');
     const id = rows[0].id;
@@ -212,14 +224,15 @@ async function apartar(cuerpo) {
           `🗓 ${fechaLegible(inicio)}${fin !== inicio ? ` al ${fechaLegible(fin)}` : ''}\n` +
           `${dormir === false ? '☀️ Solo de día' : dormir === true ? '🌙 Se quedan a dormir' : '🌙 No dijeron si se quedan a dormir'}\n` +
           (personas !== null ? `👥 ${personas} personas\n` : '') +
-          `\nReservación #${id}, confirmada y sin costo. Genera su PIN en Admin → Accesos.`
+          `💰 ${cuota > 0 ? `Cuota ${pesos(cuota)}${concepto ? ` (${concepto})` : ''}` : 'Sin costo'}\n` +
+          `\nReservación #${id}, confirmada. Genera su PIN en Admin → Accesos.`
       );
     }
 
     return {
       ok: true,
       resultado: 'aplicado',
-      detalle: `Listo, la quinta queda prestada: reservación #${id}`,
+      detalle: `Listo, la quinta queda prestada ${costo}: reservación #${id}`,
       reserva: reservaParaRino(id, 'confirmada'),
     };
   } catch (err) {
