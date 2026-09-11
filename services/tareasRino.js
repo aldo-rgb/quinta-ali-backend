@@ -166,17 +166,26 @@ async function sincronizarTareas() {
            estado_rino = $2, responsable_rino = $3, responsable_rino_email = $4,
            completada_en = $5, rino_actualizado_en = $6, actualizado_en = NOW()
          WHERE id::text = $1
-         RETURNING ticket_id`,
+         RETURNING ticket_id, cancelada`,
         [String(t.id), t.status, rino.nombreResponsable(t.responsable_email, t.responsable),
           t.responsable_email, t.completed_at, t.updated_at]
       );
       if (!r.rowCount) continue;
       actualizadas++;
 
-      const ticketId = r.rows[0].ticket_id;
+      const { ticket_id: ticketId, cancelada: canceladaPorQuinta } = r.rows[0];
       if (ticketId && t.terminada) {
         await pool.query(
           `UPDATE tickets_servicio SET estado = 'resuelto', actualizado_en = NOW()
+            WHERE id = $1 AND estado = 'enviado_rino'`,
+          [ticketId]
+        );
+      } else if (ticketId && t.cancelada && !canceladaPorQuinta) {
+        // Rino la canceló sin que Quinta lo pidiera: el reporte vuelve a abierto
+        // para reenviarlo a otra persona o descartarlo, en vez de quedarse
+        // "En Rino" sin nadie que lo atienda.
+        await pool.query(
+          `UPDATE tickets_servicio SET estado = 'abierto', actualizado_en = NOW()
             WHERE id = $1 AND estado = 'enviado_rino'`,
           [ticketId]
         );

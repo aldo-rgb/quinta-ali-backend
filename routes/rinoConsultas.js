@@ -6,6 +6,7 @@
  *
  *   POST /api/rino/disponibilidad     { desde, hasta }             manual, "Reservas e ingresos"
  *   POST /api/rino/reservas           { reserva: { ... } }         manual, "Reservas e ingresos"
+ *   POST /api/rino/reservas/cancelar  { reserva: { id, numero, fecha_inicio, fecha_fin, motivo?, solicita? } }
  *   POST /api/rino/servicio-cliente   { desde?, hasta?, estado? }  reportes de clientes
  *
  * Se monta en index.js ANTES de express.json(): cada ruta lee el cuerpo crudo.
@@ -41,6 +42,9 @@ router.post('/disponibilidad', consulta('disponibilidad', reservasRino.disponibi
 
 router.post('/reservas', consulta('reservas', reservasRino.apartar,
   'No se pudo apartar la fecha; inténtalo de nuevo'));
+
+router.post('/reservas/cancelar', consulta('reservas/cancelar', reservasRino.cancelar,
+  'No se pudo cancelar la fecha; inténtalo de nuevo'));
 
 router.post('/servicio-cliente', consulta('servicio-cliente', reportesRino.consultar,
   'No se pudieron consultar los reportes de La Quinta de Alí'));

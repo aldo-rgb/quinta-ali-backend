@@ -6,6 +6,7 @@
  *
  *   disponibilidad({ desde, hasta }) → lo que ocupa al menos un día del rango
  *   apartar({ reserva })             → préstamo de día completo, confirmado
+ *   cancelar({ reserva })            → cancela una fecha que apartó Rino (nunca una de clientes)
  *
  * Lo que aparta Rino es la quinta PRESTADA a familia o conocidos, sin contrato.
  * Entra confirmada, sin costo o con la cuota simbólica que manden (monto_total
@@ -247,4 +248,83 @@ async function apartar(cuerpo) {
   }
 }
 
-module.exports = { disponibilidad, apartar };
+/**
+ * Cancela una fecha que apartó Grupo Rino. Solo reservas con rino_reserva_id,
+ * y comprueba que número y fechas sean los de esa reserva: nunca toca las de
+ * clientes. Hace lo mismo que cancelar desde el admin (estado 'cancelada': deja
+ * de ocupar el calendario y de recibir recordatorios), con el motivo en notas.
+ */
+async function cancelar(cuerpo) {
+  const r = cuerpo?.reserva ?? {};
+  const rinoId = String(r.id ?? '').trim().slice(0, 80);
+  const numero = String(r.numero ?? '').trim();
+  const inicio = String(r.fecha_inicio ?? '');
+  const fin = String(r.fecha_fin || inicio);
+  const motivo = String(r.motivo ?? '').trim().slice(0, 500) || null;
+  const solicita = String(r.solicita ?? '').trim().slice(0, 80) || null;
+
+  const error =
+    !rinoId ? 'Falta el id de la reserva' :
+    !/^res-\d+$/.test(numero) ? 'El número va como res-123, el que les devolvimos al apartar' :
+    !FECHA.test(inicio) || !FECHA.test(fin) ? 'Las fechas van como AAAA-MM-DD' :
+    null;
+  if (error) return { ok: false, resultado: 'no_aplicado', detalle: error };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, estado, rino_reserva_id, fecha_evento::text AS inicio,
+              COALESCE(fecha_fin, fecha_evento)::text AS fin
+         FROM reservaciones WHERE id = $1 FOR UPDATE`,
+      [Number(numero.slice(4))]
+    );
+    const res = rows[0];
+
+    if (!res || res.rino_reserva_id !== rinoId || res.inicio !== inicio || res.fin !== fin) {
+      await client.query('ROLLBACK');
+      return {
+        ok: false,
+        resultado: 'no_existe',
+        detalle: `No encontramos una fecha apartada por Grupo Rino con el número ${numero} del ${fechaLegible(inicio)}`,
+      };
+    }
+    if (res.estado === 'cancelada') {
+      await client.query('ROLLBACK');
+      return { ok: true, resultado: 'duplicado', detalle: `La reservación #${res.id} ya estaba cancelada`, reserva: reservaParaRino(res.id, 'cancelada') };
+    }
+
+    const nota = `Cancelada por Grupo Rino${solicita ? ` (la pidió ${solicita})` : ''}${motivo ? `: ${motivo}` : ''}.`;
+    await client.query(
+      `UPDATE reservaciones
+          SET estado = 'cancelada', notas = CONCAT_WS(E'\\n', NULLIF(notas, ''), $2::text), actualizado_en = NOW()
+        WHERE id = $1`,
+      [res.id, nota]
+    );
+    await client.query('COMMIT');
+
+    if (process.env.ADMIN_WHATSAPP) {
+      whatsapp.enviarMensaje(
+        process.env.ADMIN_WHATSAPP,
+        `❌ *Grupo Rino canceló una fecha*\n\n` +
+          `🗓 ${fechaLegible(inicio)}${fin !== inicio ? ` al ${fechaLegible(fin)}` : ''}\n` +
+          `Reservación #${res.id}${solicita ? ` · la canceló ${solicita}` : ''}` +
+          (motivo ? `\n💬 ${motivo}` : '')
+      );
+    }
+
+    return {
+      ok: true,
+      resultado: 'aplicado',
+      detalle: `Listo, se canceló la reservación #${res.id}`,
+      reserva: reservaParaRino(res.id, 'cancelada'),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { disponibilidad, apartar, cancelar };
