@@ -103,6 +103,24 @@ async function migrarRino(pool) {
       procesado_en  TIMESTAMPTZ
     )
   `);
+
+  // Reservas que aparta Grupo Rino (services/reservasRino.js): su id, para no
+  // apartar dos veces la misma solicitud, y el tipo de evento que mandan.
+  await pool.query(`ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS rino_reserva_id VARCHAR(80)`);
+  await pool.query(`ALTER TABLE reservaciones ADD COLUMN IF NOT EXISTS tipo_evento VARCHAR(80)`);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_reservaciones_rino_reserva
+      ON reservaciones(rino_reserva_id) WHERE rino_reserva_id IS NOT NULL
+  `);
+
+  // Paquete de lo que aparta Rino: día completo e inactivo para que no salga en
+  // la web. El monto de cada reserva es el que manda Rino.
+  await pool.query(`
+    INSERT INTO paquetes (nombre, descripcion, tipo_duracion, duracion_horas, precio, capacidad_max, activo, slug, emoji, caracteristicas)
+    VALUES ('Apartado Rino', 'Fecha apartada por Grupo Rino desde su app. Día completo.',
+            'noche', NULL, 0, NULL, FALSE, 'apartado-rino', '🦏', '[]'::jsonb)
+    ON CONFLICT (slug) DO NOTHING
+  `);
 }
 
 module.exports = migrarRino;

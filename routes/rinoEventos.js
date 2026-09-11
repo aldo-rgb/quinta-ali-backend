@@ -18,6 +18,7 @@
 const { Router } = require('express');
 const pool = require('../db/connection');
 const rino = require('../services/rino');
+const rinoFirma = require('../middleware/rinoFirma');
 const pendientesRino = require('../services/pendientesRino');
 const tareasRino = require('../services/tareasRino');
 
@@ -50,29 +51,13 @@ router.get('/', (req, res) => {
 });
 
 // POST /api/rino/eventos
-router.post('/', async (req, res) => {
-  if (!process.env.RINO_WEBHOOK_SECRET) {
-    return res.status(503).json({
-      ok: false, resultado: 'sin_configurar', detalle: 'Quinta de Ali no tiene el secreto de firma configurado',
-    });
-  }
-
-  const crudo = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-  if (!rino.firmaValida(crudo, req.get('x-signature'))) {
-    return res.status(401).json({ ok: false, resultado: 'firma_invalida', detalle: 'X-Signature no coincide con el cuerpo' });
-  }
-
+router.post('/', rinoFirma, async (req, res) => {
   const eventId = String(req.get('x-event-id') || '').trim().slice(0, 160);
   if (!eventId) {
     return res.status(400).json({ ok: false, resultado: 'sin_event_id', detalle: 'Falta X-Event-Id' });
   }
 
-  let evento;
-  try {
-    evento = JSON.parse(crudo.toString('utf8'));
-  } catch {
-    return res.status(400).json({ ok: false, resultado: 'no_es_json', detalle: 'El cuerpo no es JSON' });
-  }
+  const evento = req.cuerpoRino;
   const nombre = String(evento?.event ?? evento?.evento ?? '').slice(0, 80);
 
   try {
