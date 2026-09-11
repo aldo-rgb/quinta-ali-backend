@@ -5,16 +5,19 @@
  * viven aquí: Rino pregunta en el momento y no guarda copia.
  *
  *   disponibilidad({ desde, hasta }) → lo que ocupa al menos un día del rango
- *   apartar({ reserva })             → reservación de día completo, pendiente
+ *   apartar({ reserva })             → préstamo de día completo, confirmado
  *
- * Lo que aparta Rino entra con el paquete "Apartado Rino" (inactivo, no sale en
- * la web), estado `pendiente` y monto pagado en 0: el anticipo que mandan es lo
- * acordado, no lo cobrado, y se anota en las notas.
+ * Lo que aparta Rino es la quinta PRESTADA a familia o conocidos: no paga ni
+ * genera contrato. Entra confirmada, con monto $0 (los montos que manden se
+ * ignoran) y con el paquete "Prestada Rino · Con noche" o "· Solo día", que es
+ * lo único que importa del paquete: si se quedan a dormir. El PIN de acceso se
+ * da a mano desde el admin.
  */
 const pool = require('../db/connection');
 const whatsapp = require('./whatsapp');
 
-const SLUG_PAQUETE = 'apartado-rino';
+const PAQUETE_NOCHE = 'prestada-rino-noche';
+const PAQUETE_DIA = 'prestada-rino-dia';
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS_CONSULTA = 400;
 const MAX_DIAS_APARTADO = 60;
@@ -40,15 +43,14 @@ function diasEntre(desde, hasta) {
   return Math.round((Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / 864e5);
 }
 
-/** null si no viene; NaN si viene mal. */
-function numero(valor) {
-  if (valor === null || valor === undefined || valor === '') return null;
-  const n = Number(valor);
-  return Number.isFinite(n) && n >= 0 ? n : NaN;
-}
-
-function pesos(n) {
-  return `$${Number(n).toLocaleString('es-MX')}`;
+/** true / false, o null si Rino no lo dijo. Acepta `se_quedan_a_dormir` o `paquete`. */
+function seQuedanADormir(r) {
+  const valor = r.se_quedan_a_dormir ?? r.paquete;
+  if (valor === true || valor === false) return valor;
+  const t = String(valor ?? '').trim().toLowerCase();
+  if (['true', 'si', 'sí', 'noche', 'hospedaje', 'premium'].includes(t)) return true;
+  if (['false', 'no', 'dia', 'día', 'basico', 'básico'].includes(t)) return false;
+  return null;
 }
 
 function reservaParaRino(id, estado) {
@@ -135,9 +137,8 @@ async function apartar(cuerpo) {
   const cliente = String(r.cliente ?? '').trim().slice(0, 100);
   const telefono = String(r.telefono ?? '').trim().slice(0, 20) || null;
   const tipoEvento = String(r.tipo_evento ?? '').trim().slice(0, 80) || null;
-  const total = numero(r.monto_total);
-  const anticipo = numero(r.anticipo);
-  const personas = numero(r.personas);
+  const personas = r.personas === null || r.personas === undefined || r.personas === '' ? null : Number(r.personas);
+  const dormir = seQuedanADormir(r);
 
   // El detalle se le muestra tal cual a quien aparta: va escrito para una persona.
   const error =
@@ -146,10 +147,8 @@ async function apartar(cuerpo) {
     fin < inicio ? 'La fecha final no puede ser antes que la inicial' :
     inicio < hoyEnMonterrey() ? 'No se puede apartar una fecha que ya pasó' :
     diasEntre(inicio, fin) > MAX_DIAS_APARTADO ? `No se pueden apartar más de ${MAX_DIAS_APARTADO} días seguidos` :
-    !cliente ? 'Falta el nombre del cliente' :
-    [total, anticipo, personas].some(Number.isNaN) ? 'Monto, anticipo y personas van como números sin signo' :
-    personas !== null && !Number.isInteger(personas) ? 'Las personas van como número entero' :
-    total !== null && anticipo !== null && anticipo > total ? 'El anticipo no puede ser mayor que el total' :
+    !cliente ? 'Falta el nombre de quien usa la quinta' :
+    personas !== null && !(Number.isInteger(personas) && personas >= 0) ? 'Las personas van como número entero' :
     null;
   if (error) return { ok: false, resultado: 'no_aplicado', detalle: error };
 
@@ -179,26 +178,28 @@ async function apartar(cuerpo) {
       return { ok: false, resultado: 'fecha_ocupada', detalle: `El ${fechaLegible(dia)} ya está ocupado en La Quinta de Alí` };
     }
 
-    const paquete = await client.query('SELECT id FROM paquetes WHERE slug = $1', [SLUG_PAQUETE]);
-    if (!paquete.rows[0]) throw new Error('Falta el paquete "Apartado Rino"');
+    // Sin dato, con noche: es lo más prevenido para quien prepara la quinta.
+    const slug = dormir === false ? PAQUETE_DIA : PAQUETE_NOCHE;
+    const paquete = await client.query('SELECT id FROM paquetes WHERE slug = $1', [slug]);
+    if (!paquete.rows[0]) throw new Error(`Falta el paquete ${slug}`);
 
     const clienteId = await clienteParaRino(client, { nombre: cliente, telefono, rinoId });
 
     const solicita = String(r.solicita ?? '').trim().slice(0, 80);
     const notas = [
+      `Prestada por Grupo Rino${solicita ? ` (la pidió ${solicita})` : ''}, sin costo.`,
+      `Se quedan a dormir: ${dormir === true ? 'sí' : dormir === false ? 'no' : 'sin especificar'}`,
+      tipoEvento ? `Motivo: ${tipoEvento}` : null,
       String(r.notas ?? '').trim() || null,
-      tipoEvento ? `Tipo de evento: ${tipoEvento}` : null,
-      anticipo ? `Anticipo acordado: ${pesos(anticipo)} (sin cobrar)` : null,
-      `Apartada desde Grupo Rino${solicita ? ` por ${solicita}` : ''}`,
     ].filter(Boolean).join('\n');
 
     const { rows } = await client.query(
       `INSERT INTO reservaciones
          (cliente_id, paquete_id, fecha_evento, fecha_fin, hora_inicio, hora_fin, num_invitados,
           estado, monto_total, monto_pagado, notas, tipo_evento, rino_reserva_id)
-       VALUES ($1, $2, $3, $4, '00:00', '23:59', $5, 'pendiente', $6, 0, $7, $8, $9)
+       VALUES ($1, $2, $3, $4, '00:00', '23:59', $5, 'confirmada', 0, 0, $6, $7, $8)
        RETURNING id`,
-      [clienteId, paquete.rows[0].id, inicio, fin, personas, total ?? 0, notas, tipoEvento, rinoId]
+      [clienteId, paquete.rows[0].id, inicio, fin, personas, notas, tipoEvento, rinoId]
     );
     await client.query('COMMIT');
     const id = rows[0].id;
@@ -206,20 +207,20 @@ async function apartar(cuerpo) {
     if (process.env.ADMIN_WHATSAPP) {
       whatsapp.enviarMensaje(
         process.env.ADMIN_WHATSAPP,
-        `📅 *Grupo Rino apartó una fecha*\n\n` +
+        `📅 *Grupo Rino prestó la quinta*\n\n` +
           `👤 ${cliente}${telefono ? ` · ${telefono}` : ''}\n` +
           `🗓 ${fechaLegible(inicio)}${fin !== inicio ? ` al ${fechaLegible(fin)}` : ''}\n` +
-          (tipoEvento ? `🎉 ${tipoEvento}\n` : '') +
-          (total !== null ? `💰 ${pesos(total)}\n` : '') +
-          `\nReservación #${id}, pendiente. Revísala en el panel admin.`
+          `${dormir === false ? '☀️ Solo de día' : dormir === true ? '🌙 Se quedan a dormir' : '🌙 No dijeron si se quedan a dormir'}\n` +
+          (personas !== null ? `👥 ${personas} personas\n` : '') +
+          `\nReservación #${id}, confirmada y sin costo. Genera su PIN en Admin → Accesos.`
       );
     }
 
     return {
       ok: true,
       resultado: 'aplicado',
-      detalle: `Apartada en La Quinta de Alí: reservación #${id}`,
-      reserva: reservaParaRino(id, 'pendiente'),
+      detalle: `Listo, la quinta queda prestada: reservación #${id}`,
+      reserva: reservaParaRino(id, 'confirmada'),
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

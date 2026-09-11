@@ -113,12 +113,24 @@ async function migrarRino(pool) {
       ON reservaciones(rino_reserva_id) WHERE rino_reserva_id IS NOT NULL
   `);
 
-  // Paquete de lo que aparta Rino: día completo e inactivo para que no salga en
-  // la web. El monto de cada reserva es el que manda Rino.
+  // Paquetes de lo que presta Rino (familia y conocidos, sin costo): día completo,
+  // inactivos para que no salgan en la web, y separados de los paquetes de venta
+  // para no contar en ingresos ni en "más vendidos". El paquete solo dice si se
+  // quedan a dormir. El primer paquete se llamó "Apartado Rino" y nunca se usó:
+  // se renombra en vez de dejarlo suelto.
+  await pool.query(`
+    UPDATE paquetes
+       SET nombre = 'Prestada Rino · Con noche', slug = 'prestada-rino-noche', emoji = '🌙',
+           descripcion = 'Quinta prestada por Grupo Rino, sin costo. Se quedan a dormir.'
+     WHERE slug = 'apartado-rino'
+       AND NOT EXISTS (SELECT 1 FROM paquetes WHERE slug = 'prestada-rino-noche')
+  `);
   await pool.query(`
     INSERT INTO paquetes (nombre, descripcion, tipo_duracion, duracion_horas, precio, capacidad_max, activo, slug, emoji, caracteristicas)
-    VALUES ('Apartado Rino', 'Fecha apartada por Grupo Rino desde su app. Día completo.',
-            'noche', NULL, 0, NULL, FALSE, 'apartado-rino', '🦏', '[]'::jsonb)
+    VALUES ('Prestada Rino · Con noche', 'Quinta prestada por Grupo Rino, sin costo. Se quedan a dormir.',
+            'noche', NULL, 0, NULL, FALSE, 'prestada-rino-noche', '🌙', '[]'::jsonb),
+           ('Prestada Rino · Solo día', 'Quinta prestada por Grupo Rino, sin costo. No se quedan a dormir.',
+            'horas', NULL, 0, NULL, FALSE, 'prestada-rino-dia', '☀️', '[]'::jsonb)
     ON CONFLICT (slug) DO NOTHING
   `);
 }
