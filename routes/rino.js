@@ -2,7 +2,7 @@
  * Puente con Rino Living — rutas.
  *
  * Pública:
- *   POST  /api/rino/reportes                — formulario "Ayuda y Soporte" (/reporte)
+ *   POST  /api/rino/reportes                — formulario "Ayuda y Soporte" (/reporte); se manda solo a mantenimiento
  * Admin:
  *   GET   /api/rino/estado                  — ¿configurado? ¿Rino nos reconoce?
  *   GET   /api/rino/usuarios                — personal de Rino para asignar
@@ -36,6 +36,13 @@ const router = Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// A quién le llegan en Rino los reportes de clientes (/reporte), por correo del
+// personal de Rino. De fábrica: Ivan Berlanga responsable y Sabino Hernadez involucrado.
+const REPORTES_RESPONSABLE =
+  String(process.env.RINO_REPORTES_RESPONSABLE ?? 'elgozt96@gmail.com').trim().toLowerCase() || null;
+const REPORTES_INVOLUCRADOS = String(process.env.RINO_REPORTES_INVOLUCRADOS ?? 'hernandezsabino613@gmail.com')
+  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+
 const reporteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -60,6 +67,19 @@ router.post('/reportes', reporteLimiter, async (req, res) => {
 
     const id = await crearTicket({ origen: 'reporte_web', categoria: area, descripcion: problema, contacto });
     res.status(201).json({ ok: true, id });
+
+    // Directo a mantenimiento de Rino, sin esperar al admin ni hacer esperar al
+    // cliente. Si falla, el reporte queda abierto en el admin para mandarlo a mano.
+    tareasRino.crearTarea({
+      titulo: `${area}: ${problema}`.slice(0, 120),
+      descripcion: contacto ? `${problema}\n\nContacto del cliente: ${contacto}` : problema,
+      area,
+      prioridad: 'fuego',
+      responsableEmail: REPORTES_RESPONSABLE,
+      involucradosEmails: REPORTES_INVOLUCRADOS,
+      ticketId: id,
+      creadoPor: 'reporte de cliente (automático)',
+    }).catch((err) => console.error(`Error mandando el reporte #${id} a Rino:`, err.message));
   } catch (err) {
     console.error('Error guardando reporte de cliente:', err.message);
     res.status(500).json({ message: 'No se pudo guardar el reporte' });
@@ -176,40 +196,23 @@ router.post('/tareas', adminAuth, async (req, res) => {
       if (!existe) return res.status(404).json({ message: 'El reporte de cliente no existe' });
     }
 
-    // El nombre se toma de la lista de Rino, no de lo que mande el navegador.
-    let responsableNombre = null;
+    // Solo se puede asignar a quien aparece en la lista de Rino que ve el admin.
     if (responsableEmail && rino.configurado()) {
       try {
         const usuarios = await rino.consultarUsuarios();
-        const u = usuarios.find((x) => String(x.email).toLowerCase() === responsableEmail);
-        if (!u) {
+        if (!usuarios.some((x) => String(x.email).toLowerCase() === responsableEmail)) {
           return res.status(400).json({ message: 'Esa persona ya no aparece en el personal de Rino. Actualiza la lista.' });
         }
-        responsableNombre = u.nombre;
       } catch {
         // Sin lista se manda igual: si Rino no reconoce el correo, la deja
         // sin responsable y le avisa a Dirección.
       }
     }
 
-    const id = crypto.randomUUID();
-    await pool.query(
-      `INSERT INTO tareas_rino
-         (id, titulo, descripcion, area, prioridad, responsable_email, responsable_nombre,
-          fecha_limite, ticket_id, creado_por, evento_id, evento_en)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-      [id, titulo, descripcion, area, prioridad, responsableEmail, responsableNombre,
-        fechaLimite, ticketId, req.admin?.email || null, crypto.randomUUID()]
-    );
-
-    if (ticketId) {
-      await pool.query(
-        `UPDATE tickets_servicio SET estado = 'enviado_rino', actualizado_en = NOW() WHERE id = $1`,
-        [ticketId]
-      );
-    }
-
-    res.status(201).json(await tareasRino.enviarTarea(id));
+    res.status(201).json(await tareasRino.crearTarea({
+      titulo, descripcion, area, prioridad, responsableEmail, fechaLimite, ticketId,
+      creadoPor: req.admin?.email || null,
+    }));
   } catch (err) {
     console.error('Error creando tarea para Rino:', err.message);
     res.status(500).json({ message: 'No se pudo crear la tarea' });

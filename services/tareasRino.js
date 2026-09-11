@@ -20,6 +20,7 @@ const PAGINAS_SYNC = 10;
 function descripcionParaRino(t) {
   return [
     t.descripcion,
+    t.involucrados?.length ? `Involucrados: ${t.involucrados.map((i) => i.nombre || i.email).join(', ')}` : null,
     t.area ? `Área: ${t.area}` : null,
     t.ticket_id ? `Viene del reporte de cliente #${t.ticket_id}` : null,
     `(Enviada desde el admin de Quinta de Ali${t.creado_por ? ` por ${t.creado_por}` : ''})`,
@@ -38,6 +39,9 @@ function payloadTarea(t) {
       // Rino reemplaza el responsable por el que llegue aquí.
       assignee_email: t.responsable_rino_email || t.responsable_email || null,
       due_at: t.fecha_limite ? new Date(t.fecha_limite).toISOString() : null,
+      // Mismo nombre que usa EntregaX. Rino todavía no lo aplica a socios; mientras
+      // tanto los involucrados también van en la descripción.
+      participants: (t.involucrados || []).map((i) => ({ email: i.email, nombre: i.nombre })),
     },
   };
 }
@@ -78,6 +82,45 @@ async function enviarTarea(id) {
   });
   const { estado, rotarEvento } = rino.clasificarEnvio(r);
   return guardarEnvio(t.id, { estado, detalle: r.detalle, contar: true, rotarEvento });
+}
+
+/**
+ * Crea una tarea para mantenimiento de Rino y la manda. Los nombres salen de la
+ * lista del personal de Rino; si Rino no contesta, se guardan solo los correos.
+ */
+async function crearTarea({
+  titulo, descripcion = null, area = null, prioridad = 'estrella',
+  responsableEmail = null, involucradosEmails = [], fechaLimite = null, ticketId = null, creadoPor = null,
+}) {
+  let nombres = new Map();
+  if (rino.configurado() && (responsableEmail || involucradosEmails.length)) {
+    try {
+      const usuarios = await rino.consultarUsuarios();
+      nombres = new Map(usuarios.map((u) => [String(u.email).toLowerCase(), u.nombre]));
+    } catch {
+      // Sin lista se manda igual: Rino resuelve a cada quien por su correo.
+    }
+  }
+  const involucrados = involucradosEmails.map((email) => ({ email, nombre: nombres.get(email) || null }));
+
+  const id = crypto.randomUUID();
+  await pool.query(
+    `INSERT INTO tareas_rino
+       (id, titulo, descripcion, area, prioridad, responsable_email, responsable_nombre, involucrados,
+        fecha_limite, ticket_id, creado_por, evento_id, evento_en)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
+    [id, titulo, descripcion, area, prioridad, responsableEmail, nombres.get(responsableEmail) || null,
+      JSON.stringify(involucrados), fechaLimite, ticketId, creadoPor, crypto.randomUUID()]
+  );
+
+  if (ticketId) {
+    await pool.query(
+      `UPDATE tickets_servicio SET estado = 'enviado_rino', actualizado_en = NOW() WHERE id = $1`,
+      [ticketId]
+    );
+  }
+
+  return enviarTarea(id);
 }
 
 /** Reintenta las que no llegaron. Las `rechazada` no: Rino dijo por qué y hay que corregirlas. */
@@ -162,6 +205,7 @@ async function comprobantesDe(id) {
 }
 
 module.exports = {
+  crearTarea,
   enviarTarea,
   reintentarPendientes,
   sincronizarTareas,

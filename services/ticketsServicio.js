@@ -12,7 +12,7 @@ const pool = require('../db/connection');
 const whatsapp = require('./whatsapp');
 
 const AVISO = {
-  reporte_web: { titulo: '🆘 *Reporte de cliente', donde: 'Admin → Rino para mandarlo a mantenimiento' },
+  reporte_web: { titulo: '🆘 *Reporte de cliente', donde: 'Admin → Rino; ya se mandó solo a mantenimiento' },
   queja: { titulo: '😟 *Queja de cliente', donde: 'Admin → Reseñas' },
   resena: { titulo: '⭐ *Reseña baja', donde: 'Admin → Reseñas' },
 };
